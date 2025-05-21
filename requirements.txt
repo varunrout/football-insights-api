@@ -1,0 +1,10 @@
+fastapi~=0.115.12
+uvicorn[standard]
+pandas~=2.2.3
+python-dotenv
+pydantic-settings~=2.9.1
+statsbombpy~=1.16.0
+
+
+pydantic~=2.11.4
+datetime~=5.5
