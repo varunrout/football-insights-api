@@ -1,35 +1,49 @@
-from fastapi import FastAPI
+import logging
+from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from app.config.environment import settings, setup_logging
+from app.api import dashboard, xt_analytics, player_comparison, tactical_insights, positional_analysis, matchup_analysis, player_analysis
 
-from app.routers import dashboard_main
-from app.routers import xt_analytics  # Import our new XT analytics router
-from app.routers import tactical_metrics  # Import our new tactical metrics router
+# Set up logging
+setup_logging()
+logger = logging.getLogger("main")
 
+# Create FastAPI app
 app = FastAPI(
- title="Football Insights API",
- description="API for accessing football analytics and insights",
- version="0.1.0"
+    title="Football Insights API",
+    description="API for football analytics and visualizations",
+    version="0.1.0"
 )
 
 # Configure CORS
-app.add_middleware(
- CORSMiddleware,
- allow_origins=["*"],  # For development; restrict in production
- allow_credentials=True,
- allow_methods=["*"],
- allow_headers=["*"],
-)
+if settings.ENABLE_CORS:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.ALLOWED_ORIGINS,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
-# Include routers
-app.include_router(dashboard_main.router)
-app.include_router(xt_analytics.router)  # Add the XT analytics router
-app.include_router(tactical_metrics.router)  # Add the tactical metrics router
+# Include routers for different visualization categories
+app.include_router(dashboard.router, prefix="/api/dashboard", tags=["Dashboard"])
+app.include_router(xt_analytics.router, prefix="/api/xt", tags=["xT Analytics"])
+app.include_router(player_comparison.router, prefix="/api/player-comparison", tags=["Player Comparison"])
+app.include_router(tactical_insights.router, prefix="/api/tactics", tags=["Tactical Insights"])
+app.include_router(positional_analysis.router, prefix="/api/positions", tags=["Positional Analysis"])
+app.include_router(matchup_analysis.router, prefix="/api/matchups", tags=["Match-Up Analysis"])
+app.include_router(player_analysis.router, prefix="/api/players", tags=["Player Analysis"])
 
-
-@app.get("/")
+@app.get("/", tags=["Root"])
 async def root():
- return {
- "message": "Welcome to Football Insights API",
- "docs": "/docs",
- "version": "0.1.0"
- }
+    """Root endpoint - API information"""
+    return {
+        "name": "Football Insights API",
+        "version": "0.1.0",
+        "documentation": "/docs",
+        "environment": settings.ENVIRONMENT
+    }
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("app.main:app", host=settings.API_HOST, port=settings.API_PORT, reload=True)
