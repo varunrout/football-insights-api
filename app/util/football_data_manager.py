@@ -8,6 +8,7 @@ import pandas as pd
 from statsbombpy import sb
 from typing import Dict, List, Tuple, Optional, Union
 import requests
+import json
 
 
 class FootballDataManager:
@@ -57,6 +58,9 @@ class FootballDataManager:
                 
             self.competitions_cache = competitions
             
+        # Ensure competitions_cache is always a DataFrame
+        if not isinstance(self.competitions_cache, pd.DataFrame):
+            self.competitions_cache = pd.DataFrame(self.competitions_cache)
         return self.competitions_cache
     
     def get_matches(self, competition_id: int, season_id: int, 
@@ -114,18 +118,18 @@ class FootballDataManager:
             try:
                 frames = sb.frames(match_id=match_id)
                 self.frames_cache[match_id] = frames
-            except requests.exceptions.HTTPError as e:
-                # Handle 404 errors when 360 data is not available for this match
-                if e.response.status_code == 404:
+            except (requests.exceptions.HTTPError, json.JSONDecodeError) as e:
+                # Handle 404 errors or JSON decoding errors
+                if isinstance(e, requests.exceptions.HTTPError) and e.response.status_code == 404:
                     print(f"360 data not available for match {match_id}. Returning empty DataFrame.")
-                    # Create empty DataFrame with expected structure
-                    self.frames_cache[match_id] = pd.DataFrame({
-                        'id': [], 'visible_area': [], 'match_id': [],
-                        'teammate': [], 'actor': [], 'keeper': [], 'location': []
-                    })
                 else:
-                    # Re-raise if it's not a 404 error
-                    raise
+                    print(f"Error fetching 360 data for match {match_id}: {str(e)}. Returning empty DataFrame.")
+                
+                # Create empty DataFrame with expected structure
+                self.frames_cache[match_id] = pd.DataFrame({
+                    'id': [], 'visible_area': [], 'match_id': [],
+                    'teammate': [], 'actor': [], 'keeper': [], 'location': []
+                })
             
         return self.frames_cache[match_id]
     
@@ -200,7 +204,7 @@ class FootballDataManager:
         with open(file_path, 'rb') as f:
             return pickle.load(f)
     
-    def prepare_data_for_analysis(self, competition_ids: List[int] = None, 
+    def prepare_data_for_analysis(self, competition_ids: Optional[List[int]] = None, 
                                 max_matches_per_competition: int = 5) -> Dict:
         """
         Prepare a comprehensive dataset for analysis across multiple competitions.
@@ -280,7 +284,7 @@ class FootballDataManager:
         
         return analysis_data
     
-    def save_analysis_dataset(self, analysis_data: Dict, dataset_name: str = None) -> str:
+    def save_analysis_dataset(self, analysis_data: Dict, dataset_name: Optional[str] = None) -> str:
         """
         Save complete analysis dataset to disk in a structured format.
         
