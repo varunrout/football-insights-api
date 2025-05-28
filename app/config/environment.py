@@ -8,7 +8,7 @@ import logging
 from enum import Enum
 from pathlib import Path
 from typing import List, Optional
-from pydantic import BaseSettings, Field, validator
+from pydantic import BaseSettings as PydanticBaseSettings, Field, validator
 from dotenv import load_dotenv
 
 # Load environment variables from .env file if present
@@ -21,7 +21,7 @@ class Environment(str, Enum):
     QUAL = "QUAL"   # Pre-production validation (mirror of PROD)
     PROD = "PROD"   # Production deployment
 
-class Settings(BaseSettings):
+class Settings(PydanticBaseSettings):
     """Application settings loaded from environment variables"""
     
     # Environment settings
