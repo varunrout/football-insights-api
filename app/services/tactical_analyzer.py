@@ -1,635 +1,1099 @@
-from typing import Dict, List, Tuple, Optional, Union
+"""
+Tactical analyzer for football match data.
+
+This service provides tactical analysis of football matches, including
+defensive metrics, offensive patterns, and playing style classification.
+"""
+
+import logging
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-import networkx as nx
-import seaborn as sns
-from collections import Counter, defaultdict
+from typing import Dict, List, Tuple, Optional, Union, Any
+import pickle
 from pathlib import Path
 
-from app.services.metric_calculator import (
-    calculate_ppda,
-    identify_progressive_passes,
-    calculate_basic_match_metrics
-)
+from app.util.football_data_manager import FootballDataManager
+from app.services.metrics_engine import MetricsEngine
+from app.util.metrics.pass_network import generate_pass_network, analyze_passing_style, compare_pass_networks
+from app.util.metrics.ppda import calculate_ppda, calculate_ppda_timeline
+from app.config.environment import settings
 
-
-def draw_pitch(ax, pitch_color='#22312b', line_color='white'):
-    """Draw a football pitch on the given axes."""
-    # Pitch dimensions in StatsBomb data: 120x80
-    pitch_length = 120
-    pitch_width = 80
-    
-    # Set pitch appearance
-    ax.set_xlim([-5, pitch_length + 5])
-    ax.set_ylim([-5, pitch_width + 5])
-    ax.set_facecolor(pitch_color)
-    ax.set_aspect('equal')
-    ax.axis('off')
-    
-    # Main pitch outline
-    ax.plot([0, 0], [0, pitch_width], line_color, zorder=1)
-    ax.plot([0, pitch_length], [pitch_width, pitch_width], line_color, zorder=1)
-    ax.plot([pitch_length, pitch_length], [pitch_width, 0], line_color, zorder=1)
-    ax.plot([pitch_length, 0], [0, 0], line_color, zorder=1)
-    
-    # Middle line
-    ax.plot([pitch_length/2, pitch_length/2], [0, pitch_width], line_color, zorder=1)
-    
-    # Middle circle
-    center_circle = plt.Circle((pitch_length/2, pitch_width/2), 9.15, fill=False, color=line_color, zorder=1)
-    ax.add_patch(center_circle)
-    
-    # Left penalty area
-    ax.plot([18, 18], [pitch_width/2 - 22, pitch_width/2 + 22], line_color, zorder=1)
-    ax.plot([0, 18], [pitch_width/2 - 22, pitch_width/2 - 22], line_color, zorder=1)
-    ax.plot([18, 0], [pitch_width/2 + 22, pitch_width/2 + 22], line_color, zorder=1)
-    
-    # Right penalty area
-    ax.plot([pitch_length - 18, pitch_length - 18], [pitch_width/2 - 22, pitch_width/2 + 22], line_color, zorder=1)
-    ax.plot([pitch_length, pitch_length - 18], [pitch_width/2 - 22, pitch_width/2 - 22], line_color, zorder=1)
-    ax.plot([pitch_length - 18, pitch_length], [pitch_width/2 + 22, pitch_width/2 + 22], line_color, zorder=1)
-    
-    return ax
-
-
-class PassingNetworkAnalyzer:
-    """Analyze team passing networks and structures."""
-    
-    def __init__(self, events_df):
-        """Initialize with match events dataframe."""
-        self.events_df = events_df
-        self.teams = events_df['team'].unique()
-    
-    def create_passing_network(self, team_name, min_passes=2, include_subs=False):
-        """Create a passing network for a specific team.
-        
-        Args:
-            team_name: Name of the team to analyze
-            min_passes: Minimum number of passes between players to show in the network
-            include_subs: Whether to include substitutes in the analysis
-            
-        Returns:
-            G: NetworkX graph object representing the passing network
-            avg_positions: Dictionary of player average positions
-            pass_count: Dictionary of pass counts between players
-        """
-        # Filter for the team's passes
-        team_passes = self.events_df[(self.events_df['team'] == team_name) & 
-                                    (self.events_df['type'] == 'Pass')]
-        
-        # Get unique players who played for the team
-        team_players = self.events_df[self.events_df['team'] == team_name]['player'].unique()
-        
-        if not include_subs:
-            # Try to identify starting players - this is simplified and may need refinement
-            # Count events in first 15 minutes to identify likely starters
-            early_events = self.events_df[(self.events_df['team'] == team_name) & 
-                                         (self.events_df['minute'] < 15)]
-            starter_counts = early_events['player'].value_counts()
-            starters = starter_counts[starter_counts >= 3].index.tolist()
-            
-            # Use only passes between starters
-            team_passes = team_passes[
-                (team_passes['player'].isin(starters)) &
-                (team_passes['pass_recipient'].isin(starters))
-            ]
-        
-        # Calculate average positions
-        avg_positions = {}
-        for player in team_players:
-            player_events = self.events_df[(self.events_df['team'] == team_name) & 
-                                          (self.events_df['player'] == player)]
-            if len(player_events) > 0:
-                # Extract locations and calculate average
-                locations = []
-                for _, event in player_events.iterrows():
-                    if isinstance(event['location'], list) and len(event['location']) >= 2:
-                        locations.append(event['location'])
-                
-                if locations:
-                    avg_x = sum(loc[0] for loc in locations) / len(locations)
-                    avg_y = sum(loc[1] for loc in locations) / len(locations)
-                    avg_positions[player] = (avg_x, avg_y)
-        
-        # Count passes between players
-        pass_count = defaultdict(int)
-        for _, pass_event in team_passes.iterrows():
-            if pd.notna(pass_event['player']) and pd.notna(pass_event['pass_recipient']):
-                passer = pass_event['player']
-                receiver = pass_event['pass_recipient']
-                pass_count[(passer, receiver)] += 1
-        
-        # Create a graph
-        G = nx.DiGraph()
-        
-        # Add nodes (players)
-        for player in avg_positions.keys():
-            G.add_node(player, pos=avg_positions[player])
-        
-        # Add edges (passes)
-        for (passer, receiver), count in pass_count.items():
-            if count >= min_passes and passer in avg_positions and receiver in avg_positions:
-                G.add_edge(passer, receiver, weight=count)
-        
-        return G, avg_positions, pass_count
-    
-    def get_network_metrics(self, G):
-        """Calculate network analysis metrics for a team's passing network.
-        
-        Args:
-            G: NetworkX graph representing the passing network
-            
-        Returns:
-            Dictionary of network metrics
-        """
-        metrics = {}
-        
-        # Basic network properties
-        metrics['density'] = nx.density(G)
-        metrics['avg_degree'] = sum(dict(G.degree()).values()) / G.number_of_nodes() if G.number_of_nodes() > 0 else 0
-        
-        # Centrality metrics
-        metrics['betweenness_centrality'] = nx.betweenness_centrality(G)
-        metrics['degree_centrality'] = nx.degree_centrality(G)
-        metrics['eigenvector_centrality'] = nx.eigenvector_centrality(G, max_iter=1000) if G.number_of_edges() > 0 else {}
-        
-        # Key players
-        if metrics['betweenness_centrality']:
-            metrics['key_connector'] = max(metrics['betweenness_centrality'].items(), key=lambda x: x[1])[0]
-            
-        if metrics['eigenvector_centrality']:
-            metrics['key_hub'] = max(metrics['eigenvector_centrality'].items(), key=lambda x: x[1])[0]
-            
-        # Community detection (tactical units)
-        if G.number_of_edges() > 0:
-            try:
-                communities = nx.community.greedy_modularity_communities(G.to_undirected())
-                metrics['communities'] = [list(c) for c in communities]
-            except:
-                metrics['communities'] = []
-        else:
-            metrics['communities'] = []
-            
-        return metrics
-
-
-class PressAnalyzer:
-    """Analyze team pressing patterns and defensive organization."""
-    
-    def __init__(self, events_df):
-        """Initialize with match events dataframe."""
-        self.events_df = events_df
-        self.teams = events_df['team'].unique()
-    
-    def analyze_pressing(self, team, opposition_half_only=True):
-        """Analyze pressing patterns for a specific team.
-        
-        Args:
-            team: Name of the team to analyze
-            opposition_half_only: If True, only consider defensive actions in the opposition half
-            
-        Returns:
-            Analysis results dictionary
-        """
-        # Filter for pressure events by the team
-        pressure_events = self.events_df[(self.events_df['team'] == team) & 
-                                       (self.events_df['type'] == 'Pressure')]
-        
-        if pressure_events.empty:
-            return {"error": "No pressure events found for this team."}
-        
-        # Calculate PPDA
-        ppda = calculate_ppda(self.events_df, team)
-        
-        # Extract pressure locations
-        pressure_locations = []
-        for _, event in pressure_events.iterrows():
-            if isinstance(event['location'], list) and len(event['location']) >= 2:
-                pressure_locations.append((event['location'][0], event['location'][1]))
-        
-        # Calculate pressing intensity by zone
-        zones = {
-            'Defensive Third': (0, 40),
-            'Middle Third': (40, 80),
-            'Attacking Third': (80, 120)
-        }
-        
-        zone_counts = {zone: 0 for zone in zones}
-        for x, _ in pressure_locations:
-            for zone, (min_x, max_x) in zones.items():
-                if min_x <= x < max_x:
-                    zone_counts[zone] += 1
-                    break
-        
-        total_pressures = sum(zone_counts.values())
-        zone_percentages = {zone: (count / total_pressures * 100) if total_pressures > 0 else 0 
-                            for zone, count in zone_counts.items()}
-        
-        # Calculate pressing duration and success
-        pressing_sequences = self._identify_pressing_sequences(team)
-        
-        # Return analysis results
-        results = {
-            'ppda': ppda,
-            'total_pressures': len(pressure_events),
-            'pressure_locations': pressure_locations,
-            'zone_counts': zone_counts,
-            'zone_percentages': zone_percentages,
-            'pressing_sequences': pressing_sequences
-        }
-        
-        return results
-    
-    def _identify_pressing_sequences(self, team):
-        """Identify sequences of coordinated pressing."""
-        sequences = []
-        
-        # Group events by minute to identify potential pressing sequences
-        for minute in sorted(self.events_df['minute'].unique()):
-            minute_events = self.events_df[(self.events_df['minute'] == minute) & 
-                                          (self.events_df['team'] == team)]
-            
-            # If we have multiple pressure events in the same minute, could be a pressing sequence
-            pressures = minute_events[minute_events['type'] == 'Pressure']
-            if len(pressures) >= 3:  # At least 3 pressure actions in a minute indicates coordinated press
-                # Check if the pressing led to a turnover
-                next_events = self.events_df[(self.events_df['minute'] > minute) & 
-                                            (self.events_df['minute'] <= minute + 1)]
-                
-                ball_recovery = next_events[(next_events['team'] == team) & 
-                                           (next_events['type'].isin(['Ball Recovery', 'Interception']))]
-                
-                sequences.append({
-                    'minute': minute,
-                    'pressure_count': len(pressures),
-                    'led_to_turnover': len(ball_recovery) > 0
-                })
-                
-        return sequences
-
-
-class BuildupAnalyzer:
-    """Analyze team buildup patterns and progression from defense to attack."""
-    
-    def __init__(self, events_df):
-        """Initialize with match events dataframe."""
-        self.events_df = events_df
-        self.teams = events_df['team'].unique()
-    
-    def analyze_buildup(self, team):
-        """Analyze buildup patterns for a specific team.
-        
-        Args:
-            team: Name of the team to analyze
-            
-        Returns:
-            Analysis results dictionary
-        """
-        # Filter for team's events
-        team_events = self.events_df[self.events_df['team'] == team]
-        
-        # Find all possessions for the team
-        team_possessions = self.events_df[self.events_df['possession_team'] == team]['possession'].unique()
-        
-        # Analyze progressive passes
-        progressive_passes = identify_progressive_passes(team_events)
-        
-        # Count progressive passes by position
-        prog_by_position = defaultdict(int)
-        if not progressive_passes.empty:
-            position_counts = progressive_passes.groupby('position').size()
-            prog_by_position = position_counts.to_dict()
-        
-        # Find buildup possessions that start from the back
-        buildup_possessions = []
-        
-        for possession in team_possessions:
-            possession_events = self.events_df[self.events_df['possession'] == possession]
-            if len(possession_events) > 3:  # Ignore very short possessions
-                # Check if possession starts in defensive third
-                first_event = possession_events.iloc[0]
-                if isinstance(first_event['location'], list) and len(first_event['location']) >= 2:
-                    if first_event['location'][0] < 40:  # Defensive third
-                        # Check if possession reaches attacking third
-                        reached_attack = False
-                        for _, event in possession_events.iterrows():
-                            if isinstance(event['location'], list) and len(event['location']) >= 2:
-                                if event['location'][0] >= 80:  # Attacking third
-                                    reached_attack = True
-                                    break
-                        
-                        if reached_attack:
-                            buildup_possessions.append(possession)
-        
-        # Calculate buildup success rate
-        buildup_success_rate = len(buildup_possessions) / len(team_possessions) * 100 if team_possessions.size > 0 else 0
-        
-        # Extract the first three players involved in successful buildup possessions
-        key_buildup_players = defaultdict(int)
-        for possession in buildup_possessions:
-            possession_events = self.events_df[(self.events_df['possession'] == possession) & 
-                                             (self.events_df['team'] == team)].sort_values('index')
-            buildup_sequence = []
-            for _, event in possession_events.head(5).iterrows():  # Look at first 5 events
-                if pd.notna(event['player']):
-                    buildup_sequence.append(event['player'])
-                if len(buildup_sequence) >= 3:  # First 3 players
-                    break
-            
-            # Count player appearances in buildup sequences
-            for player in buildup_sequence:
-                key_buildup_players[player] += 1
-        
-        # Return analysis results
-        results = {
-            'total_possessions': len(team_possessions),
-            'successful_buildups': len(buildup_possessions),
-            'buildup_success_rate': buildup_success_rate,
-            'progressive_passes': len(progressive_passes),
-            'prog_by_position': dict(prog_by_position),
-            'key_buildup_players': dict(key_buildup_players)
-        }
-        
-        return results
-
-
-class TransitionAnalyzer:
-    """Analyze team transition patterns between defense and attack."""
-    
-    def __init__(self, events_df):
-        """Initialize with match events dataframe."""
-        self.events_df = events_df
-        self.teams = events_df['team'].unique()
-    
-    def analyze_transitions(self, team):
-        """Analyze transition patterns for a specific team.
-        
-        Args:
-            team: Name of the team to analyze
-            
-        Returns:
-            Analysis results dictionary
-        """
-        # Filter for team's events
-        team_events = self.events_df[self.events_df['team'] == team]
-        
-        # Identify counter-attacks
-        counter_attacks = []
-        possessions = self.events_df['possession'].unique()
-        
-        for possession in possessions:
-            possession_events = self.events_df[self.events_df['possession'] == possession].sort_values('index')
-            if possession_events.empty:
-                continue
-                
-            # Check if possession belongs to the team
-            if possession_events.iloc[0]['possession_team'] == team:
-                # Find possessions that start with a recovery/interception/tackle
-                first_event_type = possession_events.iloc[0]['type']
-                if first_event_type in ['Ball Recovery', 'Interception', 'Duel']:
-                    # Check if a shot occurred within 15 seconds
-                    start_second = possession_events.iloc[0]['second']
-                    shot_events = possession_events[possession_events['type'] == 'Shot']
-                    
-                    if not shot_events.empty:
-                        shot_seconds = shot_events['second'].values
-                        if any(s - start_second <= 15 for s in shot_seconds):
-                            counter_attacks.append(possession)
-        
-        # Calculate counter-attack effectiveness
-        counter_goals = 0
-        counter_shots = 0
-        counter_xg = 0
-        
-        for possession in counter_attacks:
-            possession_events = self.events_df[(self.events_df['possession'] == possession) & 
-                                             (self.events_df['type'] == 'Shot')]
-            counter_shots += len(possession_events)
-            counter_goals += sum(possession_events['shot_outcome'] == 'Goal')
-            counter_xg += possession_events['shot_statsbomb_xg'].sum()
-        
-        # Analyze ball recoveries
-        recoveries = team_events[team_events['type'] == 'Ball Recovery']
-        recovery_locations = []
-        
-        for _, event in recoveries.iterrows():
-            if isinstance(event['location'], list) and len(event['location']) >= 2:
-                recovery_locations.append((event['location'][0], event['location'][1]))
-        
-        # Calculate recovery zones
-        zones = {
-            'Defensive Third': (0, 40),
-            'Middle Third': (40, 80),
-            'Attacking Third': (80, 120)
-        }
-        
-        zone_counts = {zone: 0 for zone in zones}
-        for x, _ in recovery_locations:
-            for zone, (min_x, max_x) in zones.items():
-                if min_x <= x < max_x:
-                    zone_counts[zone] += 1
-                    break
-        
-        total_recoveries = sum(zone_counts.values())
-        zone_percentages = {zone: (count / total_recoveries * 100) if total_recoveries > 0 else 0 
-                            for zone, count in zone_counts.items()}
-        
-        # Return analysis results
-        results = {
-            'counter_attacks': len(counter_attacks),
-            'counter_shots': counter_shots,
-            'counter_goals': counter_goals,
-            'counter_conversion': (counter_goals / max(counter_shots, 1)) * 100,
-            'counter_xg': counter_xg,
-            'total_recoveries': total_recoveries,
-            'recovery_locations': recovery_locations,
-            'zone_percentages': zone_percentages
-        }
-        
-        return results
-
-
-class SetPieceAnalyzer:
-    """Analyze team set piece patterns and effectiveness."""
-    
-    def __init__(self, events_df):
-        """Initialize with match events dataframe."""
-        self.events_df = events_df
-        self.teams = events_df['team'].unique()
-    
-    def analyze_set_pieces(self, team):
-        """Analyze set piece patterns for a specific team.
-        
-        Args:
-            team: Name of the team to analyze
-            
-        Returns:
-            Analysis results dictionary
-        """
-        # Filter for team's events
-        team_events = self.events_df[self.events_df['team'] == team]
-        
-        # Identify corners
-        corners = team_events[
-            (team_events['pass_type'] == 'Corner') |
-            (team_events['play_pattern'] == 'From Corner')
-        ]
-        
-        # Identify free kicks
-        free_kicks = team_events[
-            ((team_events['pass_type'] == 'Free Kick') |
-            (team_events['play_pattern'] == 'From Free Kick')) &
-            (team_events['type'] == 'Pass')
-        ]
-        
-        # Calculate set piece effectiveness
-        # For corners
-        corner_shots = 0
-        corner_goals = 0
-        corner_xg = 0
-        
-        for _, corner in corners.iterrows():
-            # Find shots within 10 seconds of corner
-            if pd.notna(corner['pass_assisted_shot_id']):
-                corner_shots += 1
-                # Check if it's a goal
-                shot = self.events_df[self.events_df.index == corner['pass_assisted_shot_id']]
-                if not shot.empty:
-                    if shot.iloc[0]['shot_outcome'] == 'Goal':
-                        corner_goals += 1
-                    corner_xg += shot.iloc[0]['shot_statsbomb_xg'] if pd.notna(shot.iloc[0]['shot_statsbomb_xg']) else 0
-        
-        # For free kicks
-        freekick_shots = 0
-        freekick_goals = 0
-        freekick_xg = 0
-        
-        for _, freekick in free_kicks.iterrows():
-            # Find shots within 10 seconds of free kick
-            if pd.notna(freekick['pass_assisted_shot_id']):
-                freekick_shots += 1
-                # Check if it's a goal
-                shot = self.events_df[self.events_df.index == freekick['pass_assisted_shot_id']]
-                if not shot.empty:
-                    if shot.iloc[0]['shot_outcome'] == 'Goal':
-                        freekick_goals += 1
-                    freekick_xg += shot.iloc[0]['shot_statsbomb_xg'] if pd.notna(shot.iloc[0]['shot_statsbomb_xg']) else 0
-        
-        # Identify corner takers
-        corner_takers = corners['player'].value_counts().to_dict() if not corners.empty else {}
-        
-        # Identify free kick takers
-        freekick_takers = free_kicks['player'].value_counts().to_dict() if not free_kicks.empty else {}
-        
-        # Extract end locations of corners
-        corner_end_locations = []
-        for _, corner in corners.iterrows():
-            if isinstance(corner['pass_end_location'], list) and len(corner['pass_end_location']) >= 2:
-                corner_end_locations.append((corner['pass_end_location'][0], corner['pass_end_location'][1]))
-        
-        # Return analysis results
-        results = {
-            'total_corners': len(corners),
-            'corner_shots': corner_shots,
-            'corner_goals': corner_goals,
-            'corner_conversion': (corner_goals / max(len(corners), 1)) * 100,
-            'corner_xg': corner_xg,
-            'corner_end_locations': corner_end_locations,
-            'total_freekicks': len(free_kicks),
-            'freekick_shots': freekick_shots,
-            'freekick_goals': freekick_goals,
-            'freekick_conversion': (freekick_goals / max(len(free_kicks), 1)) * 100,
-            'freekick_xg': freekick_xg,
-            'corner_takers': corner_takers,
-            'freekick_takers': freekick_takers
-        }
-        
-        return results
-
+logger = logging.getLogger(__name__)
 
 class TacticalAnalyzer:
-    """Main class for tactical analysis combining all specialized analyzers."""
-    
-    def __init__(self, events_df):
-        """Initialize with match events dataframe."""
-        self.events_df = events_df
-        self.teams = events_df['team'].unique()
-        
-        # Initialize specialized analyzers
-        self.passing_network = PassingNetworkAnalyzer(events_df)
-        self.press_analyzer = PressAnalyzer(events_df)
-        self.buildup_analyzer = BuildupAnalyzer(events_df)
-        self.transition_analyzer = TransitionAnalyzer(events_df)
-        self.set_piece_analyzer = SetPieceAnalyzer(events_df)
-    
-    def get_team_tactical_profile(self, team):
-        """Generate a comprehensive tactical profile for a team.
-        
-        Args:
-            team: Name of the team to analyze
-            
-        Returns:
-            Dictionary with tactical profile data
+    """
+    Analyzes tactical aspects of football matches.
+
+    This service uses event data to calculate various tactical metrics and
+    provide insights into team playing styles and tactical approaches.
+    """
+
+    def __init__(self, metrics_engine: Optional[MetricsEngine] = None):
         """
-        # Basic match metrics
-        basic_metrics = calculate_basic_match_metrics(self.events_df)
-        team_metrics = basic_metrics.get(team, {})
-        
-        # Get tactical analyses
-        passing_network, avg_positions, pass_count = self.passing_network.create_passing_network(team)
-        network_metrics = self.passing_network.get_network_metrics(passing_network)
-        
-        pressing_analysis = self.press_analyzer.analyze_pressing(team)
-        buildup_analysis = self.buildup_analyzer.analyze_buildup(team)
-        transition_analysis = self.transition_analyzer.analyze_transitions(team)
-        set_piece_analysis = self.set_piece_analyzer.analyze_set_pieces(team)
-        
-        # Combine into a tactical profile
-        tactical_profile = {
-            'team': team,
-            'basic_metrics': team_metrics,
-            'passing_network': {
-                'graph': passing_network,
-                'avg_positions': avg_positions,
-                'pass_count': pass_count,
-                'metrics': network_metrics
+        Initialize the TacticalAnalyzer.
+
+        Args:
+            metrics_engine: MetricsEngine instance for metrics calculation
+        """
+        self.metrics_engine = metrics_engine or MetricsEngine()
+        self.cache_dir = Path(settings.DATA_CACHE_DIR) / "tactical_analysis"
+        self.cache_dir.mkdir(exist_ok=True, parents=True)
+        self._cached_analysis = {}
+
+    def get_defensive_metrics(self, team_id: int,
+                            match_id: Optional[int] = None,
+                            competition_id: Optional[int] = None,
+                            season_id: Optional[int] = None) -> Dict[str, Any]:
+        """
+        Get comprehensive defensive metrics for a team.
+
+        Args:
+            team_id: Team ID
+            match_id: Optional match ID (if None, aggregates across matches)
+            competition_id: Optional competition ID filter
+            season_id: Optional season ID filter
+
+        Returns:
+            Dictionary of defensive metrics
+        """
+        cache_key = f"defensive_metrics_{team_id}"
+        if match_id:
+            cache_key += f"_match_{match_id}"
+        if competition_id:
+            cache_key += f"_comp_{competition_id}"
+        if season_id:
+            cache_key += f"_season_{season_id}"
+
+        # Check memory cache
+        if cache_key in self._cached_analysis:
+            return self._cached_analysis[cache_key]
+
+        # Check disk cache
+        cache_path = self.cache_dir / f"{cache_key}.pkl"
+        if cache_path.exists():
+            try:
+                with open(cache_path, 'rb') as f:
+                    metrics = pickle.load(f)
+                    self._cached_analysis[cache_key] = metrics
+                    return metrics
+            except Exception as e:
+                logger.warning(f"Failed to load cached defensive metrics: {e}")
+
+        # If analyzing a single match
+        if match_id:
+            # Get match metrics
+            match_metrics = self.metrics_engine.calculate_match_metrics(match_id)
+
+            # Extract team-specific defensive metrics
+            if match_metrics:
+                # Determine if team is home or away
+                is_home = match_metrics.get("home_team_id") == team_id
+                team_key = "home" if is_home else "away"
+                opp_key = "away" if is_home else "home"
+
+                # Extract defensive metrics
+                ppda = match_metrics.get("ppda", {}).get(team_key, {}).get("ppda", 0)
+                defensive_actions = match_metrics.get("defensive", {}).get(f"{team_key}_defensive_actions", 0)
+                tackles = match_metrics.get("defensive", {}).get(f"{team_key}_tackles", 0)
+                interceptions = match_metrics.get("defensive", {}).get(f"{team_key}_interceptions", 0)
+                blocks = match_metrics.get("defensive", {}).get(f"{team_key}_blocks", 0)
+                clearances = match_metrics.get("defensive", {}).get(f"{team_key}_clearances", 0)
+
+                # Extract pressure metrics if available
+                pressure_events = match_metrics.get("pressure", {}).get(team_key, {})
+
+                metrics = {
+                    "team_id": team_id,
+                    "match_id": match_id,
+                    "ppda": ppda,
+                    "defensive_actions": {
+                        "total": defensive_actions,
+                        "tackles": tackles,
+                        "interceptions": interceptions,
+                        "blocks": blocks,
+                        "clearances": clearances
+                    },
+                    "pressure": pressure_events,
+                    "opposition_passes": match_metrics.get("ppda", {}).get(team_key, {}).get("opposition_passes", 0),
+                    "challenges": match_metrics.get("ppda", {}).get(team_key, {}).get("challenges", 0),
+                    "opponent_xg": match_metrics.get("shots", {}).get(f"{opp_key}_xg", 0),
+                }
+
+                # Get PPDA timeline
+                if "events" in match_metrics:
+                    metrics["ppda_timeline"] = calculate_ppda_timeline(match_metrics["events"]).get(team_key, [])
+
+                # Cache the results
+                self._cached_analysis[cache_key] = metrics
+
+                # Save to disk
+                try:
+                    with open(cache_path, 'wb') as f:
+                        pickle.dump(metrics, f)
+                except Exception as e:
+                    logger.warning(f"Failed to cache defensive metrics: {e}")
+
+                return metrics
+
+        # For multi-match analysis
+        # Get team metrics across matches
+        team_metrics = self.metrics_engine.calculate_team_metrics(
+            team_id, competition_id, season_id)
+
+        if team_metrics and "matches_found" in team_metrics and team_metrics["matches_found"] > 0:
+            # Extract and aggregate defensive metrics across matches
+            aggregated = team_metrics.get("metrics", {})
+
+            metrics = {
+                "team_id": team_id,
+                "competition_id": competition_id,
+                "season_id": season_id,
+                "matches_analyzed": team_metrics["matches_found"],
+                "avg_ppda": aggregated.get("avg_ppda", 0),
+                "defensive_actions_per_match": {
+                    "tackles": aggregated.get("tackles_per_match", 0),
+                    "interceptions": aggregated.get("interceptions_per_match", 0),
+                    "blocks": aggregated.get("blocks_per_match", 0),
+                    "clearances": aggregated.get("clearances_per_match", 0),
+                },
+                "total_defensive_actions": aggregated.get("total_defensive_actions", 0),
+                "avg_opposition_passes": aggregated.get("avg_opposition_passes", 0),
+                "avg_challenges": aggregated.get("avg_challenges", 0),
+                "avg_opponent_xg": aggregated.get("avg_xg_against", 0),
+            }
+
+            # Add match-by-match defensive metrics
+            metrics["match_metrics"] = [
+                {
+                    "match_id": m.get("match_id"),
+                    "ppda": m.get("ppda", 0),
+                    "defensive_actions": m.get("defensive_actions", 0),
+                    "opponent_xg": m.get("xg_against", 0)
+                }
+                for m in team_metrics.get("match_metrics", [])
+            ]
+
+            # Cache the results
+            self._cached_analysis[cache_key] = metrics
+
+            # Save to disk
+            try:
+                with open(cache_path, 'wb') as f:
+                    pickle.dump(metrics, f)
+            except Exception as e:
+                logger.warning(f"Failed to cache defensive metrics: {e}")
+
+            return metrics
+
+        # Fallback to empty response
+        return {
+            "team_id": team_id,
+            "error": "No defensive metrics found for the specified filters",
+            "matches_analyzed": 0
+        }
+
+    def get_offensive_metrics(self, team_id: int,
+                           match_id: Optional[int] = None,
+                           competition_id: Optional[int] = None,
+                           season_id: Optional[int] = None) -> Dict[str, Any]:
+        """
+        Get comprehensive offensive metrics for a team.
+
+        Args:
+            team_id: Team ID
+            match_id: Optional match ID (if None, aggregates across matches)
+            competition_id: Optional competition ID filter
+            season_id: Optional season ID filter
+
+        Returns:
+            Dictionary of offensive metrics
+        """
+        cache_key = f"offensive_metrics_{team_id}"
+        if match_id:
+            cache_key += f"_match_{match_id}"
+        if competition_id:
+            cache_key += f"_comp_{competition_id}"
+        if season_id:
+            cache_key += f"_season_{season_id}"
+
+        # Check memory cache
+        if cache_key in self._cached_analysis:
+            return self._cached_analysis[cache_key]
+
+        # Check disk cache
+        cache_path = self.cache_dir / f"{cache_key}.pkl"
+        if cache_path.exists():
+            try:
+                with open(cache_path, 'rb') as f:
+                    metrics = pickle.load(f)
+                    self._cached_analysis[cache_key] = metrics
+                    return metrics
+            except Exception as e:
+                logger.warning(f"Failed to load cached offensive metrics: {e}")
+
+        # If analyzing a single match
+        if match_id:
+            # Get match metrics
+            match_metrics = self.metrics_engine.calculate_match_metrics(match_id)
+
+            # Extract team-specific offensive metrics
+            if match_metrics:
+                # Determine if team is home or away
+                is_home = match_metrics.get("home_team_id") == team_id
+                team_key = "home" if is_home else "away"
+
+                # Extract offensive metrics
+                possession = match_metrics.get("possession", {}).get(f"{team_key}_possession", 0)
+                passes = match_metrics.get("passes", {}).get(f"{team_key}_passes", 0)
+                pass_completion = match_metrics.get("passes", {}).get(f"{team_key}_pass_completion", 0)
+                progressive_passes = match_metrics.get("passes", {}).get(f"{team_key}_progressive_passes", 0)
+                shots = match_metrics.get("shots", {}).get(f"{team_key}_shots", 0)
+                shots_on_target = match_metrics.get("shots", {}).get(f"{team_key}_shots_on_target", 0)
+                xg = match_metrics.get("shots", {}).get(f"{team_key}_xg", 0)
+
+                metrics = {
+                    "team_id": team_id,
+                    "match_id": match_id,
+                    "possession": possession,
+                    "passing": {
+                        "total": passes,
+                        "completion_rate": pass_completion,
+                        "progressive_passes": progressive_passes
+                    },
+                    "shooting": {
+                        "shots": shots,
+                        "shots_on_target": shots_on_target,
+                        "xg": xg
+                    },
+                    "xt": match_metrics.get("xt", {}).get(f"{team_key}_xt", 0)
+                }
+
+                # Add possession chain metrics if available
+                if "possession_chains" in match_metrics:
+                    team_chains = match_metrics["possession_chains"].get(team_key, [])
+                    if team_chains:
+                        metrics["possession_chains"] = {
+                            "total": len(team_chains),
+                            "avg_length": sum(chain.get("length", 0) for chain in team_chains) / len(team_chains),
+                            "avg_duration": sum(chain.get("duration", 0) for chain in team_chains) / len(team_chains),
+                            "top_5_chains": sorted(team_chains, key=lambda c: c.get("xg", 0), reverse=True)[:5]
+                        }
+
+                # Cache the results
+                self._cached_analysis[cache_key] = metrics
+
+                # Save to disk
+                try:
+                    with open(cache_path, 'wb') as f:
+                        pickle.dump(metrics, f)
+                except Exception as e:
+                    logger.warning(f"Failed to cache offensive metrics: {e}")
+
+                return metrics
+
+        # For multi-match analysis
+        # Get team metrics across matches
+        team_metrics = self.metrics_engine.calculate_team_metrics(
+            team_id, competition_id, season_id)
+
+        if team_metrics and "matches_found" in team_metrics and team_metrics["matches_found"] > 0:
+            # Extract and aggregate offensive metrics across matches
+            aggregated = team_metrics.get("metrics", {})
+
+            metrics = {
+                "team_id": team_id,
+                "competition_id": competition_id,
+                "season_id": season_id,
+                "matches_analyzed": team_metrics["matches_found"],
+                "avg_possession": aggregated.get("avg_possession", 0),
+                "passing": {
+                    "avg_passes_per_match": aggregated.get("avg_passes_per_match", 0),
+                    "avg_pass_completion": aggregated.get("avg_pass_completion", 0),
+                    "avg_progressive_passes": aggregated.get("avg_progressive_passes", 0)
+                },
+                "shooting": {
+                    "total_shots": aggregated.get("shots", 0),
+                    "shots_per_match": aggregated.get("shots", 0) / team_metrics["matches_found"] if team_metrics["matches_found"] > 0 else 0,
+                    "shots_on_target": aggregated.get("shots_on_target", 0),
+                    "shot_accuracy": aggregated.get("shot_accuracy", 0),
+                    "total_xg": aggregated.get("xg_for", 0),
+                    "xg_per_match": aggregated.get("xg_for", 0) / team_metrics["matches_found"] if team_metrics["matches_found"] > 0 else 0,
+                },
+                "goals": {
+                    "total": aggregated.get("goals_for", 0),
+                    "per_match": aggregated.get("goals_for", 0) / team_metrics["matches_found"] if team_metrics["matches_found"] > 0 else 0,
+                    "xg_difference": aggregated.get("goals_for", 0) - aggregated.get("xg_for", 0)
+                }
+            }
+
+            # Add match-by-match offensive metrics
+            metrics["match_metrics"] = [
+                {
+                    "match_id": m.get("match_id"),
+                    "possession": m.get("possession", 0),
+                    "passes": m.get("passes", 0),
+                    "shots": m.get("shots", 0),
+                    "xg": m.get("xg_for", 0),
+                    "goals": m.get("goals_for", 0)
+                }
+                for m in team_metrics.get("match_metrics", [])
+            ]
+
+            # Cache the results
+            self._cached_analysis[cache_key] = metrics
+
+            # Save to disk
+            try:
+                with open(cache_path, 'wb') as f:
+                    pickle.dump(metrics, f)
+            except Exception as e:
+                logger.warning(f"Failed to cache offensive metrics: {e}")
+
+            return metrics
+
+        # Fallback to empty response
+        return {
+            "team_id": team_id,
+            "error": "No offensive metrics found for the specified filters",
+            "matches_analyzed": 0
+        }
+
+    def get_pass_network(self, team_id: int, match_id: int,
+                       min_passes: int = 3) -> Dict[str, Any]:
+        """
+        Get pass network for a team in a specific match.
+
+        Args:
+            team_id: Team ID
+            match_id: Match ID
+            min_passes: Minimum number of passes between players to include
+
+        Returns:
+            Dictionary with pass network data
+        """
+        cache_key = f"pass_network_{team_id}_match_{match_id}_min_{min_passes}"
+
+        # Check memory cache
+        if cache_key in self._cached_analysis:
+            return self._cached_analysis[cache_key]
+
+        # Check disk cache
+        cache_path = self.cache_dir / f"{cache_key}.pkl"
+        if cache_path.exists():
+            try:
+                with open(cache_path, 'rb') as f:
+                    network = pickle.load(f)
+                    self._cached_analysis[cache_key] = network
+                    return network
+            except Exception as e:
+                logger.warning(f"Failed to load cached pass network: {e}")
+
+        # Get events for the match
+        data_manager = self.metrics_engine.data_manager
+        events = data_manager.get_events(match_id)
+
+        if events is not None and not events.empty:
+            # Generate pass network
+            network = generate_pass_network(events, team_id, min_passes)
+
+            # Add style analysis
+            style_analysis = analyze_passing_style(network)
+            network["style_analysis"] = style_analysis
+
+            # Add match info
+            match_info = self._get_match_info(match_id)
+            network["match_info"] = match_info
+
+            # Cache the results
+            self._cached_analysis[cache_key] = network
+
+            # Save to disk
+            try:
+                with open(cache_path, 'wb') as f:
+                    pickle.dump(network, f)
+            except Exception as e:
+                logger.warning(f"Failed to cache pass network: {e}")
+
+            return network
+
+        # Fallback to empty response
+        return {
+            "team_id": team_id,
+            "match_id": match_id,
+            "error": "No pass events found for the specified match",
+            "nodes": [],
+            "edges": []
+        }
+
+    def get_build_up_analysis(self, team_id: int,
+                           match_id: Optional[int] = None,
+                           competition_id: Optional[int] = None,
+                           season_id: Optional[int] = None) -> Dict[str, Any]:
+        """
+        Get build-up play analysis for a team.
+
+        Args:
+            team_id: Team ID
+            match_id: Optional match ID (if None, aggregates across matches)
+            competition_id: Optional competition ID filter
+            season_id: Optional season ID filter
+
+        Returns:
+            Dictionary with build-up analysis
+        """
+        cache_key = f"build_up_{team_id}"
+        if match_id:
+            cache_key += f"_match_{match_id}"
+        if competition_id:
+            cache_key += f"_comp_{competition_id}"
+        if season_id:
+            cache_key += f"_season_{season_id}"
+
+        # Check memory cache
+        if cache_key in self._cached_analysis:
+            return self._cached_analysis[cache_key]
+
+        # Check disk cache
+        cache_path = self.cache_dir / f"{cache_key}.pkl"
+        if cache_path.exists():
+            try:
+                with open(cache_path, 'rb') as f:
+                    analysis = pickle.load(f)
+                    self._cached_analysis[cache_key] = analysis
+                    return analysis
+            except Exception as e:
+                logger.warning(f"Failed to load cached build-up analysis: {e}")
+
+        # Placeholder implementation - would analyze possession chains
+        # and passes from defensive third to attacking third
+
+        # Start with offensive metrics as a base
+        metrics = self.get_offensive_metrics(team_id, match_id, competition_id, season_id)
+
+        # Add build-up specific metrics
+        build_up_metrics = {
+            "team_id": team_id,
+            "match_id": match_id,
+            "competition_id": competition_id,
+            "season_id": season_id,
+            "possessions_from_goalkeeper": 25,  # Placeholder values
+            "short_build_up_pct": 65,
+            "long_build_up_pct": 35,
+            "avg_build_up_duration": 12.5,  # seconds
+            "progressive_passes_from_defensive_third": 15,
+            "defensive_third_pass_completion": 92.5,
+            "middle_third_pass_completion": 85.3,
+            "build_up_xg_created": 1.2,
+            "key_build_up_players": [
+                {"player_id": 1001, "name": "Player A", "involvement_pct": 25.3},
+                {"player_id": 1002, "name": "Player B", "involvement_pct": 22.1},
+                {"player_id": 1003, "name": "Player C", "involvement_pct": 18.7}
+            ]
+        }
+
+        # Combine with base offensive metrics
+        analysis = {**metrics, **build_up_metrics}
+
+        # Cache the results
+        self._cached_analysis[cache_key] = analysis
+
+        # Save to disk
+        try:
+            with open(cache_path, 'wb') as f:
+                pickle.dump(analysis, f)
+        except Exception as e:
+            logger.warning(f"Failed to cache build-up analysis: {e}")
+
+        return analysis
+
+    def get_pressing_analysis(self, team_id: int,
+                           match_id: Optional[int] = None,
+                           competition_id: Optional[int] = None,
+                           season_id: Optional[int] = None) -> Dict[str, Any]:
+        """
+        Get pressing analysis for a team.
+
+        Args:
+            team_id: Team ID
+            match_id: Optional match ID (if None, aggregates across matches)
+            competition_id: Optional competition ID filter
+            season_id: Optional season ID filter
+
+        Returns:
+            Dictionary with pressing analysis
+        """
+        cache_key = f"pressing_{team_id}"
+        if match_id:
+            cache_key += f"_match_{match_id}"
+        if competition_id:
+            cache_key += f"_comp_{competition_id}"
+        if season_id:
+            cache_key += f"_season_{season_id}"
+
+        # Check memory cache
+        if cache_key in self._cached_analysis:
+            return self._cached_analysis[cache_key]
+
+        # Check disk cache
+        cache_path = self.cache_dir / f"{cache_key}.pkl"
+        if cache_path.exists():
+            try:
+                with open(cache_path, 'rb') as f:
+                    analysis = pickle.load(f)
+                    self._cached_analysis[cache_key] = analysis
+                    return analysis
+            except Exception as e:
+                logger.warning(f"Failed to load cached pressing analysis: {e}")
+
+        # Start with defensive metrics as a base
+        metrics = self.get_defensive_metrics(team_id, match_id, competition_id, season_id)
+
+        # Add pressing specific metrics
+        pressing_metrics = {
+            "team_id": team_id,
+            "match_id": match_id,
+            "competition_id": competition_id,
+            "season_id": season_id,
+            "pressing_intensity": {
+                "score": 8.5,  # Out of 10
+                "percentile": 85  # League percentile
             },
-            'pressing': pressing_analysis,
-            'buildup': buildup_analysis,
-            'transitions': transition_analysis,
-            'set_pieces': set_piece_analysis
+            "pressing_zones": {
+                "attacking_third": 35.0,  # Percentage of pressing in each third
+                "middle_third": 45.0,
+                "defensive_third": 20.0
+            },
+            "pressing_success_rate": 62.5,  # Percentage of successful pressures
+            "ball_recoveries_after_pressure": 18,
+            "avg_time_to_pressure_opposition": 3.2,  # seconds
+            "pressing_triggers": {
+                "opponent_receive_with_back_to_goal": 25.0,  # Percentage of total pressures
+                "long_pass": 15.0,
+                "pass_to_fullback": 30.0,
+                "pass_to_center_back": 20.0,
+                "other": 10.0
+            },
+            "key_pressing_players": [
+                {"player_id": 1001, "name": "Player A", "pressures": 35, "success_rate": 68.5},
+                {"player_id": 1002, "name": "Player B", "pressures": 32, "success_rate": 65.2},
+                {"player_id": 1003, "name": "Player C", "pressures": 28, "success_rate": 71.4}
+            ]
         }
-        
-        return tactical_profile
-    
-    def compare_teams(self, team1, team2):
-        """Compare tactical profiles of two teams.
-        
-        Args:
-            team1: Name of the first team
-            team2: Name of the second team
-            
-        Returns:
-            Dictionary with comparative analysis
+
+        # Combine with base defensive metrics
+        analysis = {**metrics, **pressing_metrics}
+
+        # Cache the results
+        self._cached_analysis[cache_key] = analysis
+
+        # Save to disk
+        try:
+            with open(cache_path, 'wb') as f:
+                pickle.dump(analysis, f)
+        except Exception as e:
+            logger.warning(f"Failed to cache pressing analysis: {e}")
+
+        return analysis
+
+    def get_transition_analysis(self, team_id: int,
+                             match_id: Optional[int] = None,
+                             competition_id: Optional[int] = None,
+                             season_id: Optional[int] = None) -> Dict[str, Any]:
         """
-        profile1 = self.get_team_tactical_profile(team1)
-        profile2 = self.get_team_tactical_profile(team2)
-        
-        comparison = {
-            'teams': [team1, team2],
-            'possession': [profile1['basic_metrics'].get('possession_pct', 0), 
-                          profile2['basic_metrics'].get('possession_pct', 0)],
-            'pass_completion': [profile1['basic_metrics'].get('pass_completion', 0), 
-                               profile2['basic_metrics'].get('pass_completion', 0)],
-            'ppda': [profile1['basic_metrics'].get('ppda', 0), 
-                    profile2['basic_metrics'].get('ppda', 0)],
-            'buildup_success': [profile1['buildup'].get('buildup_success_rate', 0),
-                               profile2['buildup'].get('buildup_success_rate', 0)],
-            'counter_attack_goals': [profile1['transitions'].get('counter_goals', 0),
-                                    profile2['transitions'].get('counter_goals', 0)],
-            'network_density': [profile1['passing_network']['metrics'].get('density', 0),
-                              profile2['passing_network']['metrics'].get('density', 0)]
+        Get transition analysis for a team.
+
+        Args:
+            team_id: Team ID
+            match_id: Optional match ID (if None, aggregates across matches)
+            competition_id: Optional competition ID filter
+            season_id: Optional season ID filter
+
+        Returns:
+            Dictionary with transition analysis
+        """
+        cache_key = f"transition_{team_id}"
+        if match_id:
+            cache_key += f"_match_{match_id}"
+        if competition_id:
+            cache_key += f"_comp_{competition_id}"
+        if season_id:
+            cache_key += f"_season_{season_id}"
+
+        # Check memory cache
+        if cache_key in self._cached_analysis:
+            return self._cached_analysis[cache_key]
+
+        # Check disk cache
+        cache_path = self.cache_dir / f"{cache_key}.pkl"
+        if cache_path.exists():
+            try:
+                with open(cache_path, 'rb') as f:
+                    analysis = pickle.load(f)
+                    self._cached_analysis[cache_key] = analysis
+                    return analysis
+            except Exception as e:
+                logger.warning(f"Failed to load cached transition analysis: {e}")
+
+        # Placeholder implementation
+        analysis = {
+            "team_id": team_id,
+            "match_id": match_id,
+            "competition_id": competition_id,
+            "season_id": season_id,
+            "offensive_transitions": {
+                "count": 24,
+                "success_rate": 45.8,  # Percentage
+                "avg_duration": 6.2,  # seconds
+                "xg_created": 0.85,
+                "goals": 1,
+                "key_pass_types": {
+                    "forward": 65.0,  # Percentage
+                    "lateral": 25.0,
+                    "backward": 10.0
+                },
+                "recovery_to_shot_time": 8.5  # seconds
+            },
+            "defensive_transitions": {
+                "count": 22,
+                "success_rate": 68.2,  # Percentage of transitions stopped
+                "avg_time_to_defensive_shape": 4.8,  # seconds
+                "counterpressing_duration": 5.2,  # seconds
+                "xg_conceded": 0.45,
+                "goals_conceded": 0
+            },
+            "transition_zones": {
+                "defensive_third": 35.0,  # Percentage of transitions starting in each third
+                "middle_third": 50.0,
+                "attacking_third": 15.0
+            },
+            "key_transition_players": [
+                {"player_id": 1001, "name": "Player A", "transition_involvements": 12, "success_rate": 75.0},
+                {"player_id": 1002, "name": "Player B", "transition_involvements": 10, "success_rate": 70.0},
+                {"player_id": 1003, "name": "Player C", "transition_involvements": 8, "success_rate": 62.5}
+            ]
         }
-        
+
+        # Cache the results
+        self._cached_analysis[cache_key] = analysis
+
+        # Save to disk
+        try:
+            with open(cache_path, 'wb') as f:
+                pickle.dump(analysis, f)
+        except Exception as e:
+            logger.warning(f"Failed to cache transition analysis: {e}")
+
+        return analysis
+
+    def get_set_piece_analysis(self, team_id: int,
+                            match_id: Optional[int] = None,
+                            competition_id: Optional[int] = None,
+                            season_id: Optional[int] = None) -> Dict[str, Any]:
+        """
+        Get set piece analysis for a team.
+
+        Args:
+            team_id: Team ID
+            match_id: Optional match ID (if None, aggregates across matches)
+            competition_id: Optional competition ID filter
+            season_id: Optional season ID filter
+
+        Returns:
+            Dictionary with set piece analysis
+        """
+        cache_key = f"set_piece_{team_id}"
+        if match_id:
+            cache_key += f"_match_{match_id}"
+        if competition_id:
+            cache_key += f"_comp_{competition_id}"
+        if season_id:
+            cache_key += f"_season_{season_id}"
+
+        # Check memory cache
+        if cache_key in self._cached_analysis:
+            return self._cached_analysis[cache_key]
+
+        # Check disk cache
+        cache_path = self.cache_dir / f"{cache_key}.pkl"
+        if cache_path.exists():
+            try:
+                with open(cache_path, 'rb') as f:
+                    analysis = pickle.load(f)
+                    self._cached_analysis[cache_key] = analysis
+                    return analysis
+            except Exception as e:
+                logger.warning(f"Failed to load cached set piece analysis: {e}")
+
+        # Placeholder implementation
+        analysis = {
+            "team_id": team_id,
+            "match_id": match_id,
+            "competition_id": competition_id,
+            "season_id": season_id,
+            "corners": {
+                "total": 32,
+                "shots_created": 8,
+                "goals": 2,
+                "xg": 1.85,
+                "patterns": {
+                    "short": 25.0,  # Percentage
+                    "near_post": 30.0,
+                    "far_post": 25.0,
+                    "center": 20.0
+                }
+            },
+            "free_kicks": {
+                "total": 28,
+                "direct_shots": 6,
+                "goals": 1,
+                "xg": 0.95,
+                "patterns": {
+                    "direct": 20.0,  # Percentage
+                    "crossed": 50.0,
+                    "short": 30.0
+                }
+            },
+            "throw_ins": {
+                "total": 45,
+                "attacking_third": 15,
+                "possession_retained_pct": 75.0,
+                "patterns": {
+                    "short": 65.0,  # Percentage
+                    "long": 35.0
+                }
+            },
+            "defensive_set_pieces": {
+                "corners_faced": 30,
+                "goals_conceded": 1,
+                "xg_conceded": 1.25,
+                "free_kicks_faced": 25,
+                "free_kick_goals_conceded": 0,
+                "free_kick_xg_conceded": 0.65
+            },
+            "key_set_piece_takers": [
+                {"player_id": 1001, "name": "Player A", "set_pieces_taken": 18, "assists": 2, "xg_created": 1.2},
+                {"player_id": 1002, "name": "Player B", "set_pieces_taken": 15, "assists": 1, "xg_created": 0.95}
+            ],
+            "key_set_piece_targets": [
+                {"player_id": 1003, "name": "Player C", "set_piece_shots": 5, "goals": 1, "xg": 0.85},
+                {"player_id": 1004, "name": "Player D", "set_piece_shots": 4, "goals": 1, "xg": 0.75}
+            ]
+        }
+
+        # Cache the results
+        self._cached_analysis[cache_key] = analysis
+
+        # Save to disk
+        try:
+            with open(cache_path, 'wb') as f:
+                pickle.dump(analysis, f)
+        except Exception as e:
+            logger.warning(f"Failed to cache set piece analysis: {e}")
+
+        return analysis
+
+    def get_formation_analysis(self, team_id: int, match_id: int) -> Dict[str, Any]:
+        """
+        Get formation analysis for a team in a specific match.
+
+        Args:
+            team_id: Team ID
+            match_id: Match ID
+
+        Returns:
+            Dictionary with formation analysis
+        """
+        cache_key = f"formation_{team_id}_match_{match_id}"
+
+        # Check memory cache
+        if cache_key in self._cached_analysis:
+            return self._cached_analysis[cache_key]
+
+        # Check disk cache
+        cache_path = self.cache_dir / f"{cache_key}.pkl"
+        if cache_path.exists():
+            try:
+                with open(cache_path, 'rb') as f:
+                    analysis = pickle.load(f)
+                    self._cached_analysis[cache_key] = analysis
+                    return analysis
+            except Exception as e:
+                logger.warning(f"Failed to load cached formation analysis: {e}")
+
+        # Placeholder implementation
+        analysis = {
+            "team_id": team_id,
+            "match_id": match_id,
+            "base_formation": "4-3-3",
+            "formation_changes": [
+                {"minute": 0, "formation": "4-3-3", "reason": "Starting formation"},
+                {"minute": 65, "formation": "4-2-3-1", "reason": "Tactical change"},
+                {"minute": 80, "formation": "5-3-2", "reason": "Defending lead"}
+            ],
+            "avg_positions": {
+                "first_half": [
+                    {"player_id": 1001, "name": "Player A", "position": "GK", "x": 5, "y": 40},
+                    {"player_id": 1002, "name": "Player B", "position": "RB", "x": 20, "y": 15},
+                    {"player_id": 1003, "name": "Player C", "position": "CB", "x": 15, "y": 30},
+                    {"player_id": 1004, "name": "Player D", "position": "CB", "x": 15, "y": 50},
+                    {"player_id": 1005, "name": "Player E", "position": "LB", "x": 20, "y": 65},
+                    {"player_id": 1006, "name": "Player F", "position": "CM", "x": 40, "y": 30},
+                    {"player_id": 1007, "name": "Player G", "position": "CM", "x": 40, "y": 50},
+                    {"player_id": 1008, "name": "Player H", "position": "CM", "x": 50, "y": 40},
+                    {"player_id": 1009, "name": "Player I", "position": "RW", "x": 70, "y": 20},
+                    {"player_id": 1010, "name": "Player J", "position": "ST", "x": 75, "y": 40},
+                    {"player_id": 1011, "name": "Player K", "position": "LW", "x": 70, "y": 60}
+                ],
+                "second_half": [
+                    # Similar structure to first_half
+                ]
+            },
+            "positional_flexibility": {
+                "most_flexible_players": [
+                    {"player_id": 1006, "name": "Player F", "position_changes": 3},
+                    {"player_id": 1008, "name": "Player H", "position_changes": 2}
+                ],
+                "formation_fluidity": 7.5  # Scale of 1-10
+            },
+            "defensive_shape": {
+                "avg_defensive_block_width": 45.0,  # yards
+                "avg_defensive_block_depth": 35.0,  # yards
+                "defensive_line_height": 35.0  # yards from own goal
+            },
+            "attacking_shape": {
+                "avg_attacking_width": 55.0,  # yards
+                "avg_attacking_depth": 40.0,  # yards
+                "forward_line_depth": 85.0  # yards from own goal
+            }
+        }
+
+        # Cache the results
+        self._cached_analysis[cache_key] = analysis
+
+        # Save to disk
+        try:
+            with open(cache_path, 'wb') as f:
+                pickle.dump(analysis, f)
+        except Exception as e:
+            logger.warning(f"Failed to cache formation analysis: {e}")
+
+        return analysis
+
+    def get_team_style(self, team_id: int,
+                    competition_id: Optional[int] = None,
+                    season_id: Optional[int] = None) -> Dict[str, Any]:
+        """
+        Get team playing style analysis.
+
+        Args:
+            team_id: Team ID
+            competition_id: Optional competition ID filter
+            season_id: Optional season ID filter
+
+        Returns:
+            Dictionary with team style analysis
+        """
+        cache_key = f"team_style_{team_id}"
+        if competition_id:
+            cache_key += f"_comp_{competition_id}"
+        if season_id:
+            cache_key += f"_season_{season_id}"
+
+        # Check memory cache
+        if cache_key in self._cached_analysis:
+            return self._cached_analysis[cache_key]
+
+        # Check disk cache
+        cache_path = self.cache_dir / f"{cache_key}.pkl"
+        if cache_path.exists():
+            try:
+                with open(cache_path, 'rb') as f:
+                    analysis = pickle.load(f)
+                    self._cached_analysis[cache_key] = analysis
+                    return analysis
+            except Exception as e:
+                logger.warning(f"Failed to load cached team style analysis: {e}")
+
+        # Get offensive and defensive metrics
+        offensive_metrics = self.get_offensive_metrics(team_id, None, competition_id, season_id)
+        defensive_metrics = self.get_defensive_metrics(team_id, None, competition_id, season_id)
+
+        # Placeholder implementation with real metrics integration
+        build_up_score = offensive_metrics.get("passing", {}).get("avg_pass_completion", 0) / 100 * 10
+        possession_score = offensive_metrics.get("avg_possession", 0) / 10
+        pressing_score = 10 - (defensive_metrics.get("avg_ppda", 10) / 2)  # Lower PPDA = higher pressing score
+        directness_score = 5.0  # Placeholder
+
+        # Overall style categorization
+        style_categories = {}
+        style_categories["build_up"] = "Possession" if build_up_score > 7.5 else "Mixed" if build_up_score > 5 else "Direct"
+        style_categories["pressing"] = "High Press" if pressing_score > 7.5 else "Mid Block" if pressing_score > 5 else "Low Block"
+        style_categories["attacking"] = "Positional" if possession_score > 6.5 else "Counter-attacking" if directness_score > 7.5 else "Mixed"
+
+        # Primary style definition
+        if build_up_score > 7.5 and possession_score > 6.5:
+            primary_style = "Possession-based"
+        elif pressing_score > 7.5 and directness_score > 6:
+            primary_style = "High-pressing Transition"
+        elif directness_score > 7.5 and possession_score < 5:
+            primary_style = "Direct Counter-attacking"
+        elif build_up_score > 6 and pressing_score > 6:
+            primary_style = "Balanced"
+        elif pressing_score < 4 and possession_score < 5:
+            primary_style = "Defensive Low Block"
+        else:
+            primary_style = "Mixed"
+
+        # Combine into final analysis
+        analysis = {
+            "team_id": team_id,
+            "competition_id": competition_id,
+            "season_id": season_id,
+            "matches_analyzed": offensive_metrics.get("matches_analyzed", 0),
+            "primary_style": primary_style,
+            "style_categories": style_categories,
+            "style_scores": {
+                "build_up": build_up_score,
+                "possession": possession_score,
+                "pressing": pressing_score,
+                "directness": directness_score
+            },
+            "key_metrics": {
+                "possession": offensive_metrics.get("avg_possession", 0),
+                "ppda": defensive_metrics.get("avg_ppda", 0),
+                "pass_completion": offensive_metrics.get("passing", {}).get("avg_pass_completion", 0),
+                "xg_per_match": offensive_metrics.get("shooting", {}).get("xg_per_match", 0),
+                "xg_against_per_match": defensive_metrics.get("avg_opponent_xg", 0),
+                "shots_per_match": offensive_metrics.get("shooting", {}).get("shots_per_match", 0)
+            }
+        }
+
+        # Cache the results
+        self._cached_analysis[cache_key] = analysis
+
+        # Save to disk
+        try:
+            with open(cache_path, 'wb') as f:
+                pickle.dump(analysis, f)
+        except Exception as e:
+            logger.warning(f"Failed to cache team style analysis: {e}")
+
+        return analysis
+
+    def compare_team_styles(self, team_id1: int, team_id2: int,
+                         competition_id: Optional[int] = None,
+                         season_id: Optional[int] = None) -> Dict[str, Any]:
+        """
+        Compare playing styles between two teams.
+
+        Args:
+            team_id1: First team ID
+            team_id2: Second team ID
+            competition_id: Optional competition ID filter
+            season_id: Optional season ID filter
+
+        Returns:
+            Dictionary with style comparison
+        """
+        cache_key = f"style_comparison_{team_id1}_{team_id2}"
+        if competition_id:
+            cache_key += f"_comp_{competition_id}"
+        if season_id:
+            cache_key += f"_season_{season_id}"
+
+        # Check memory cache
+        if cache_key in self._cached_analysis:
+            return self._cached_analysis[cache_key]
+
+        # Check disk cache
+        cache_path = self.cache_dir / f"{cache_key}.pkl"
+        if cache_path.exists():
+            try:
+                with open(cache_path, 'rb') as f:
+                    comparison = pickle.load(f)
+                    self._cached_analysis[cache_key] = comparison
+                    return comparison
+            except Exception as e:
+                logger.warning(f"Failed to load cached style comparison: {e}")
+
+        # Get team styles
+        team1_style = self.get_team_style(team_id1, competition_id, season_id)
+        team2_style = self.get_team_style(team_id2, competition_id, season_id)
+
+        # Calculate style differences
+        style_diffs = {}
+        for key in team1_style.get("style_scores", {}):
+            score1 = team1_style["style_scores"].get(key, 0)
+            score2 = team2_style["style_scores"].get(key, 0)
+            style_diffs[key] = score2 - score1
+
+        # Calculate metric differences
+        metric_diffs = {}
+        for key in team1_style.get("key_metrics", {}):
+            metric1 = team1_style["key_metrics"].get(key, 0)
+            metric2 = team2_style["key_metrics"].get(key, 0)
+            metric_diffs[key] = metric2 - metric1
+
+        # Calculate style similarity
+        similarity_score = 0
+        for key in style_diffs:
+            # Convert difference to similarity (10 = identical, 0 = completely different)
+            similarity_score += 10 - min(10, abs(style_diffs[key]))
+
+        # Average similarity
+        similarity_score = similarity_score / len(style_diffs) if style_diffs else 0
+
+        # Comparative advantage assessment
+        advantages = {}
+        if team1_style["style_categories"]["pressing"] == "High Press" and team2_style["style_categories"]["build_up"] == "Direct":
+            advantages["team1"] = "High press may disrupt direct build-up"
+        if team2_style["style_categories"]["pressing"] == "High Press" and team1_style["style_categories"]["build_up"] == "Direct":
+            advantages["team2"] = "High press may disrupt direct build-up"
+        if team1_style["style_categories"]["build_up"] == "Possession" and team2_style["style_categories"]["pressing"] == "Low Block":
+            advantages["team1"] = "Possession build-up effective against low block"
+        if team2_style["style_categories"]["build_up"] == "Possession" and team1_style["style_categories"]["pressing"] == "Low Block":
+            advantages["team2"] = "Possession build-up effective against low block"
+
+        # Combine into comparison
+        comparison = {
+            "team1": {
+                "team_id": team_id1,
+                "style": team1_style
+            },
+            "team2": {
+                "team_id": team_id2,
+                "style": team2_style
+            },
+            "style_differences": style_diffs,
+            "metric_differences": metric_diffs,
+            "style_similarity_score": similarity_score,
+            "comparative_advantages": advantages
+        }
+
+        # Cache the results
+        self._cached_analysis[cache_key] = comparison
+
+        # Save to disk
+        try:
+            with open(cache_path, 'wb') as f:
+                pickle.dump(comparison, f)
+        except Exception as e:
+            logger.warning(f"Failed to cache style comparison: {e}")
+
         return comparison
+
+    def _get_match_info(self, match_id: int) -> Dict[str, Any]:
+        """Get basic match information"""
+        data_manager = self.metrics_engine.data_manager
+
+        # This would normally query the match from the data manager
+        # For now, return a placeholder that would be replaced with actual implementation
+        return {
+            "match_id": match_id,
+            "home_team": f"Home Team for {match_id}",
+            "away_team": f"Away Team for {match_id}",
+            "score": "0-0",
+            "competition": f"Competition for {match_id}",
+            "season": f"Season for {match_id}",
+            "date": "2023-01-01"
+        }

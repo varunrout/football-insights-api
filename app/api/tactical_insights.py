@@ -2,8 +2,8 @@ from fastapi import APIRouter, HTTPException, Query, Depends
 from typing import List, Dict, Any, Optional
 import logging
 from app.util.football_data_manager import FootballDataManager
-from app.util.metrics.ppda import calculate_ppda, calculate_team_match_ppda
-from app.util.metrics.pass_network import calculate_pass_network, analyze_team_structure
+from app.services.metrics_engine import MetricsEngine
+from app.services.tactical_analyzer import TacticalAnalyzer
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -12,279 +12,272 @@ def get_data_manager():
     """Dependency to get FootballDataManager instance"""
     return FootballDataManager()
 
+def get_metrics_engine(fdm: FootballDataManager = Depends(get_data_manager)):
+    """Dependency to get MetricsEngine instance"""
+    return MetricsEngine(fdm)
+
+def get_tactical_analyzer(metrics_engine: MetricsEngine = Depends(get_metrics_engine)):
+    """Dependency to get TacticalAnalyzer instance"""
+    return TacticalAnalyzer(metrics_engine)
+
+@router.get("/defensive-metrics")
+async def get_defensive_metrics(
+    team_id: int = Query(..., description="Team ID"),
+    match_id: Optional[int] = Query(None, description="Match ID (if None, returns data for all matches)"),
+    competition_id: Optional[int] = Query(None, description="Filter by competition ID"),
+    season_id: Optional[int] = Query(None, description="Filter by season ID"),
+    analyzer: TacticalAnalyzer = Depends(get_tactical_analyzer)
+):
+    """
+    Get defensive metrics for a team
+
+    Returns PPDA, defensive actions, and pressure metrics
+    """
+    try:
+        # Get defensive metrics using the tactical analyzer
+        metrics = analyzer.get_defensive_metrics(
+            team_id=team_id,
+            match_id=match_id,
+            competition_id=competition_id,
+            season_id=season_id
+        )
+
+        return metrics
+    except Exception as e:
+        logger.error(f"Error getting defensive metrics: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+@router.get("/offensive-metrics")
+async def get_offensive_metrics(
+    team_id: int = Query(..., description="Team ID"),
+    match_id: Optional[int] = Query(None, description="Match ID (if None, returns data for all matches)"),
+    competition_id: Optional[int] = Query(None, description="Filter by competition ID"),
+    season_id: Optional[int] = Query(None, description="Filter by season ID"),
+    analyzer: TacticalAnalyzer = Depends(get_tactical_analyzer)
+):
+    """
+    Get offensive metrics for a team
+
+    Returns possession metrics, attacking patterns, and shot creation
+    """
+    try:
+        # Get offensive metrics using the tactical analyzer
+        metrics = analyzer.get_offensive_metrics(
+            team_id=team_id,
+            match_id=match_id,
+            competition_id=competition_id,
+            season_id=season_id
+        )
+
+        return metrics
+    except Exception as e:
+        logger.error(f"Error getting offensive metrics: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
 @router.get("/pass-network")
 async def get_pass_network(
-    match_id: int = Query(..., description="Match ID"),
     team_id: int = Query(..., description="Team ID"),
-    min_passes: int = Query(3, description="Minimum passes between players to include in network"),
-    include_subs: bool = Query(False, description="Include substitute players in the network"),
-    fdm: FootballDataManager = Depends(get_data_manager)
+    match_id: int = Query(..., description="Match ID"),
+    min_passes: int = Query(3, description="Minimum number of passes between players to include"),
+    analyzer: TacticalAnalyzer = Depends(get_tactical_analyzer)
 ):
     """
     Get pass network data for a team in a specific match
-    
-    Returns data for visualizing player positions and pass connections
+
+    Returns nodes (players) and edges (passes) for network visualization
     """
     try:
-        # Get match events
-        events = fdm.get_events(match_id)
-        
-        # Get team name from team_id
-        team_name = None
-        for _, event in events.iterrows():
-            if event.get('team_id') == team_id:
-                team_name = event.get('team')
-                break
-        
-        if not team_name:
-            raise HTTPException(status_code=404, detail=f"Team with ID {team_id} not found in match {match_id}")
-        
-        # Calculate pass network
-        pass_network = calculate_pass_network(events, team_name, min_passes, include_subs)
-        
-        # Analyze team structure
-        structure_analysis = analyze_team_structure(pass_network)
-        
-        # Combine data for response
-        response = {
-            "match_id": match_id,
-            "team_id": team_id,
-            "team_name": team_name,
-            "network": pass_network,
-            "analysis": structure_analysis
-        }
-        
-        return response
+        # Get pass network using the tactical analyzer
+        network = analyzer.get_pass_network(
+            team_id=team_id,
+            match_id=match_id,
+            min_passes=min_passes
+        )
+
+        return network
     except Exception as e:
         logger.error(f"Error getting pass network: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
-@router.get("/ppda")
-async def get_ppda_analysis(
-    competition_id: int = Query(..., description="Competition ID"),
+@router.get("/build-up-analysis")
+async def get_build_up_analysis(
     team_id: int = Query(..., description="Team ID"),
     match_id: Optional[int] = Query(None, description="Match ID (if None, returns data for all matches)"),
-    opposition_half_only: bool = Query(True, description="Consider only actions in opposition half"),
-    fdm: FootballDataManager = Depends(get_data_manager)
+    competition_id: Optional[int] = Query(None, description="Filter by competition ID"),
+    season_id: Optional[int] = Query(None, description="Filter by season ID"),
+    analyzer: TacticalAnalyzer = Depends(get_tactical_analyzer)
 ):
     """
-    Get PPDA (Passes Per Defensive Action) analysis for a team
-    
-    Returns PPDA values which measure pressing intensity (lower = more intense pressing)
+    Get build-up play analysis for a team
+
+    Returns metrics on how the team progresses the ball from defense to attack
     """
     try:
-        # If a specific match is requested
-        if match_id:
-            events = fdm.get_events(match_id)
-            team_name = None
-            
-            # Find the team name from the events
-            for _, event in events.iterrows():
-                if event.get('team_id') == team_id:
-                    team_name = event.get('team')
-                    break
-            
-            if not team_name:
-                raise HTTPException(status_code=404, detail=f"Team with ID {team_id} not found in match {match_id}")
-                
-            ppda = calculate_ppda(events, team_name, opposition_half_only)
-            
-            # Get opponent PPDA too
-            teams = events['team'].unique()
-            opponent = [t for t in teams if t != team_name][0] if len(teams) > 1 else "Unknown"
-            opponent_ppda = calculate_ppda(events, opponent, opposition_half_only)
-            
-            return {
-                "match_id": match_id,
-                "team": team_name,
-                "team_id": team_id,
-                "ppda": ppda,
-                "opponent": opponent,
-                "opponent_ppda": opponent_ppda,
-                "opposition_half_only": opposition_half_only
-            }
-        
-        # For all matches in a competition for this team
-        dataset_path = "data_cache/top_10_competitions"  # Path to the preprocessed dataset
-        analysis_data = fdm.load_analysis_dataset(dataset_path, load_data=True)
-        
-        # Find matches for this team in the competition
-        matches_data = {}
-        team_name = None
-        
-        for comp_id, comp_data in analysis_data['competitions'].items():
-            if comp_id != competition_id:
-                continue
-                
-            for match_id, match_data in comp_data['matches'].items():
-                events_df = match_data['events']
-                
-                # Check if team played in this match
-                team_events = events_df[events_df['team_id'] == team_id]
-                if not team_events.empty:
-                    team_name = team_events.iloc[0]['team']
-                    matches_data[match_id] = {
-                        'home_team': match_data['home_team'],
-                        'away_team': match_data['away_team'],
-                        'events': events_df
-                    }
-        
-        if not team_name:
-            raise HTTPException(status_code=404, detail=f"Team with ID {team_id} not found in competition {competition_id}")
-        
-        # Calculate PPDA for each match
-        ppda_by_match = []
-        for match_id, match_data in matches_data.items():
-            events_df = match_data['events']
-            ppda = calculate_ppda(events_df, team_name, opposition_half_only)
-            
-            # Determine opponent
-            is_home = match_data['home_team'] == team_name
-            opponent = match_data['away_team'] if is_home else match_data['home_team']
-            
-            ppda_by_match.append({
-                "match_id": match_id,
-                "opponent": opponent,
-                "ppda": ppda
-            })
-        
-        # Calculate average PPDA
-        avg_ppda = sum(m['ppda'] for m in ppda_by_match) / len(ppda_by_match) if ppda_by_match else 0
-        
-        return {
-            "team_id": team_id,
-            "team_name": team_name,
-            "competition_id": competition_id,
-            "average_ppda": avg_ppda,
-            "ppda_by_match": ppda_by_match,
-            "opposition_half_only": opposition_half_only
-        }
+        # Get build-up analysis using the tactical analyzer
+        analysis = analyzer.get_build_up_analysis(
+            team_id=team_id,
+            match_id=match_id,
+            competition_id=competition_id,
+            season_id=season_id
+        )
+
+        return analysis
     except Exception as e:
-        logger.error(f"Error calculating PPDA: {str(e)}")
+        logger.error(f"Error getting build-up analysis: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
-@router.get("/shot-creation")
-async def get_shot_creation_analysis(
-    match_id: int = Query(..., description="Match ID"),
+@router.get("/pressing-analysis")
+async def get_pressing_analysis(
     team_id: int = Query(..., description="Team ID"),
-    fdm: FootballDataManager = Depends(get_data_manager)
+    match_id: Optional[int] = Query(None, description="Match ID (if None, returns data for all matches)"),
+    competition_id: Optional[int] = Query(None, description="Filter by competition ID"),
+    season_id: Optional[int] = Query(None, description="Filter by season ID"),
+    analyzer: TacticalAnalyzer = Depends(get_tactical_analyzer)
 ):
     """
-    Get shot creation analysis data for a team in a specific match
-    
-    Returns data on shot creation patterns, key passes, and assist locations
+    Get pressing analysis for a team
+
+    Returns metrics on the team's pressing approach and effectiveness
     """
     try:
-        # Get match events
-        events = fdm.get_events(match_id)
-        
-        # Get team name from team_id
-        team_name = None
-        for _, event in events.iterrows():
-            if event.get('team_id') == team_id:
-                team_name = event.get('team')
-                break
-        
-        if not team_name:
-            raise HTTPException(status_code=404, detail=f"Team with ID {team_id} not found in match {match_id}")
-        
-        # Filter to team's events
-        team_events = events[events['team'] == team_name]
-        
-        # Get shots
-        shots = team_events[team_events['type'] == 'Shot']
-        
-        # Collect shot creation sequences
-        shot_sequences = []
-        
-        for _, shot in shots.iterrows():
-            sequence = {
-                "shot_id": shot.name,
-                "minute": shot.get('minute', 0),
-                "player": shot.get('player', 'Unknown'),
-                "shot_location": shot.get('location', [0, 0]),
-                "shot_outcome": shot.get('shot_outcome', 'Unknown'),
-                "xg": shot.get('shot_statsbomb_xg', 0),
-                "key_pass_id": shot.get('shot_key_pass_id'),
-                "key_pass": None
-            }
-            
-            # If there's a key pass, find it
-            if pd.notna(shot.get('shot_key_pass_id')):
-                key_pass_id = shot['shot_key_pass_id']
-                
-                # Look up the key pass event
-                key_pass_events = events[events.index == key_pass_id]
-                if not key_pass_events.empty:
-                    key_pass = key_pass_events.iloc[0]
-                    sequence["key_pass"] = {
-                        "player": key_pass.get('player', 'Unknown'),
-                        "location": key_pass.get('location', [0, 0]),
-                        "pass_end_location": key_pass.get('pass_end_location', [0, 0]),
-                        "pass_type": key_pass.get('pass_type', 'Regular')
-                    }
-            
-            shot_sequences.append(sequence)
-        
-        # Aggregate key pass locations and types
-        key_pass_locations = []
-        for seq in shot_sequences:
-            if seq["key_pass"]:
-                key_pass_locations.append({
-                    "location": seq["key_pass"]["location"],
-                    "end_location": seq["key_pass"]["pass_end_location"],
-                    "pass_type": seq["key_pass"]["pass_type"],
-                    "player": seq["key_pass"]["player"],
-                    "resulting_shot_outcome": seq["shot_outcome"],
-                    "xg": seq["xg"]
-                })
-        
-        # Compile shot creation zones (divide pitch into 6 zones and count)
-        zones = {
-            "defensive_third": 0,
-            "middle_third": 0,
-            "final_third": 0,
-            "left_channel": 0,
-            "central_channel": 0,
-            "right_channel": 0
-        }
-        
-        for kp in key_pass_locations:
-            if isinstance(kp["location"], list) and len(kp["location"]) >= 2:
-                x, y = kp["location"][0], kp["location"][1]
-                
-                # Horizontal zones (pitch length = 120)
-                if x < 40:
-                    zones["defensive_third"] += 1
-                elif x < 80:
-                    zones["middle_third"] += 1
-                else:
-                    zones["final_third"] += 1
-                
-                # Vertical zones (pitch width = 80)
-                if y < 26.6:
-                    zones["left_channel"] += 1
-                elif y < 53.3:
-                    zones["central_channel"] += 1
-                else:
-                    zones["right_channel"] += 1
-        
-        # Calculate shot creation metrics
-        total_shots = len(shots)
-        key_pass_shots = sum(1 for s in shot_sequences if s["key_pass"] is not None)
-        key_pass_percentage = (key_pass_shots / total_shots * 100) if total_shots > 0 else 0
-        
-        return {
-            "match_id": match_id,
-            "team_id": team_id,
-            "team_name": team_name,
-            "total_shots": total_shots,
-            "key_pass_shots": key_pass_shots,
-            "key_pass_percentage": key_pass_percentage,
-            "shot_sequences": shot_sequences,
-            "key_pass_locations": key_pass_locations,
-            "creation_zones": zones
-        }
+        # Get pressing analysis using the tactical analyzer
+        analysis = analyzer.get_pressing_analysis(
+            team_id=team_id,
+            match_id=match_id,
+            competition_id=competition_id,
+            season_id=season_id
+        )
+
+        return analysis
     except Exception as e:
-        logger.error(f"Error analyzing shot creation: {str(e)}")
+        logger.error(f"Error getting pressing analysis: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+@router.get("/transitions")
+async def get_transition_analysis(
+    team_id: int = Query(..., description="Team ID"),
+    match_id: Optional[int] = Query(None, description="Match ID (if None, returns data for all matches)"),
+    competition_id: Optional[int] = Query(None, description="Filter by competition ID"),
+    season_id: Optional[int] = Query(None, description="Filter by season ID"),
+    analyzer: TacticalAnalyzer = Depends(get_tactical_analyzer)
+):
+    """
+    Get transition analysis for a team
+
+    Returns metrics on the team's offensive and defensive transitions
+    """
+    try:
+        # Get transition analysis using the tactical analyzer
+        analysis = analyzer.get_transition_analysis(
+            team_id=team_id,
+            match_id=match_id,
+            competition_id=competition_id,
+            season_id=season_id
+        )
+
+        return analysis
+    except Exception as e:
+        logger.error(f"Error getting transition analysis: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+@router.get("/set-pieces")
+async def get_set_piece_analysis(
+    team_id: int = Query(..., description="Team ID"),
+    match_id: Optional[int] = Query(None, description="Match ID (if None, returns data for all matches)"),
+    competition_id: Optional[int] = Query(None, description="Filter by competition ID"),
+    season_id: Optional[int] = Query(None, description="Filter by season ID"),
+    analyzer: TacticalAnalyzer = Depends(get_tactical_analyzer)
+):
+    """
+    Get set piece analysis for a team
+
+    Returns metrics on the team's set piece effectiveness (corners, free kicks, etc.)
+    """
+    try:
+        # Get set piece analysis using the tactical analyzer
+        analysis = analyzer.get_set_piece_analysis(
+            team_id=team_id,
+            match_id=match_id,
+            competition_id=competition_id,
+            season_id=season_id
+        )
+
+        return analysis
+    except Exception as e:
+        logger.error(f"Error getting set piece analysis: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+@router.get("/formation-analysis")
+async def get_formation_analysis(
+    team_id: int = Query(..., description="Team ID"),
+    match_id: int = Query(..., description="Match ID"),
+    analyzer: TacticalAnalyzer = Depends(get_tactical_analyzer)
+):
+    """
+    Get formation analysis for a team in a specific match
+
+    Returns the team's formation, player positions, and formation shifts over time
+    """
+    try:
+        # Get formation analysis using the tactical analyzer
+        analysis = analyzer.get_formation_analysis(
+            team_id=team_id,
+            match_id=match_id
+        )
+
+        return analysis
+    except Exception as e:
+        logger.error(f"Error getting formation analysis: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+@router.get("/team-style")
+async def get_team_style(
+    team_id: int = Query(..., description="Team ID"),
+    competition_id: Optional[int] = Query(None, description="Filter by competition ID"),
+    season_id: Optional[int] = Query(None, description="Filter by season ID"),
+    analyzer: TacticalAnalyzer = Depends(get_tactical_analyzer)
+):
+    """
+    Get team playing style analysis
+
+    Returns metrics and classifications of the team's playing style
+    """
+    try:
+        # Get team style analysis using the tactical analyzer
+        analysis = analyzer.get_team_style(
+            team_id=team_id,
+            competition_id=competition_id,
+            season_id=season_id
+        )
+
+        return analysis
+    except Exception as e:
+        logger.error(f"Error getting team style analysis: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+@router.get("/style-comparison")
+async def get_style_comparison(
+    team_id1: int = Query(..., description="First team ID"),
+    team_id2: int = Query(..., description="Second team ID"),
+    competition_id: Optional[int] = Query(None, description="Filter by competition ID"),
+    season_id: Optional[int] = Query(None, description="Filter by season ID"),
+    analyzer: TacticalAnalyzer = Depends(get_tactical_analyzer)
+):
+    """
+    Compare playing styles between two teams
+
+    Returns comparative metrics and style differences
+    """
+    try:
+        # Get style comparison using the tactical analyzer
+        comparison = analyzer.compare_team_styles(
+            team_id1=team_id1,
+            team_id2=team_id2,
+            competition_id=competition_id,
+            season_id=season_id
+        )
+
+        return comparison
+    except Exception as e:
+        logger.error(f"Error getting style comparison: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
