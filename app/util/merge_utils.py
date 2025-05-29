@@ -23,7 +23,7 @@ def merge_events_360(events_df, freeze_df):
     
    
     
-    # Merge the dataframes on match_id
+    # Merge the dataframes on id field
     merged_df = events_df.merge(freeze_df, on='id', how='left')
     
     return merged_df
