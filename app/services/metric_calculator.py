@@ -114,3 +114,59 @@ def identify_progressive_passes(events_df, distance_threshold=10):
         return progressive_df
     else:
         return pd.DataFrame()
+
+
+def calculate_basic_match_metrics(events_df):
+    """
+    Calculate basic match metrics for each team from an events DataFrame.
+    Returns a dict of metrics per team.
+    """
+    teams = events_df['team'].unique()
+    metrics = {}
+    for team in teams:
+        team_events = events_df[events_df['team'] == team]
+        opposition_events = events_df[events_df['team'] != team]
+
+        # Possession
+        team_possessions = len(events_df[events_df['possession_team'] == team]['possession'].unique())
+        total_possessions = len(events_df['possession'].unique())
+        possession_pct = team_possessions / total_possessions * 100 if total_possessions > 0 else 0
+
+        # Passing
+        passes = team_events[team_events['type'] == 'Pass']
+        passes_attempted = len(passes)
+        passes_completed = len(passes[passes['pass_outcome'].isna()]) if 'pass_outcome' in passes else 0
+        pass_completion = passes_completed / passes_attempted * 100 if passes_attempted > 0 else 0
+
+        # Shooting
+        shots = team_events[team_events['type'] == 'Shot']
+        goals = len(shots[shots['shot_outcome'] == 'Goal']) if 'shot_outcome' in shots else 0
+        shots_on_target = len(shots[shots['shot_outcome'].isin(['On Target', 'Goal'])]) if 'shot_outcome' in shots else 0
+        xg = shots['shot_statsbomb_xg'].sum() if 'shot_statsbomb_xg' in shots else 0
+
+        # Defensive
+        pressures = len(team_events[team_events['type'] == 'Pressure'])
+        tackles = len(team_events[team_events['type'] == 'Tackle'])
+        interceptions = len(team_events[team_events['type'] == 'Interception'])
+
+        # PPDA (Passes allowed Per Defensive Action)
+        try:
+            ppda = calculate_ppda(events_df, team)
+        except Exception:
+            ppda = None
+
+        metrics[team] = {
+            'possession_pct': possession_pct,
+            'passes_attempted': passes_attempted,
+            'passes_completed': passes_completed,
+            'pass_completion': pass_completion,
+            'shots': len(shots),
+            'goals': goals,
+            'shots_on_target': shots_on_target,
+            'xg': xg,
+            'pressures': pressures,
+            'tackles': tackles,
+            'interceptions': interceptions,
+            'ppda': ppda
+        }
+    return metrics
