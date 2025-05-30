@@ -170,3 +170,36 @@ def calculate_basic_match_metrics(events_df):
             'ppda': ppda
         }
     return metrics
+
+
+def get_player_xt_contributions(events_df, xt_model=None):
+    """
+    Aggregate xT contributions for each player from an events DataFrame.
+    Returns a DataFrame with player, team, total_xt_added, positive_actions, avg_xt_per_action.
+    """
+    import pandas as pd
+    from collections import defaultdict
+    if xt_model is None:
+        xt_model = load_xt_model()
+    events_with_xt = calculate_xt_added(events_df, xt_model)
+    player_xt_contributions = defaultdict(float)
+    player_xt_count = defaultdict(int)
+    player_teams = {}
+    for _, event in events_with_xt.iterrows():
+        if pd.notna(event.get('player')) and event.get('xt_added', 0) > 0:
+            player = event['player']
+            player_xt_contributions[player] += event['xt_added']
+            player_xt_count[player] += 1
+            player_teams[player] = event.get('team', 'Unknown')
+    player_xt_data = []
+    for player, xt_sum in player_xt_contributions.items():
+        count = player_xt_count[player]
+        team = player_teams.get(player, 'Unknown')
+        player_xt_data.append({
+            'player': player,
+            'team': team,
+            'total_xt_added': xt_sum,
+            'positive_actions': count,
+            'avg_xt_per_action': xt_sum / count if count > 0 else 0
+        })
+    return pd.DataFrame(player_xt_data)
