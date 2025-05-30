@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, Query, Depends
 from typing import List, Dict, Any, Optional
 import logging
 from app.util.football_data_manager import FootballDataManager
+from app.services.metric_calculator import calculate_basic_match_metrics
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -18,26 +19,26 @@ async def get_dashboard_summary(
     fdm: FootballDataManager = Depends(get_data_manager)
 ):
     """
-    Get summary KPIs for dashboard
-    
-    Returns key metrics including:
-    - Goals
-    - xG
-    - Possession %
-    - PPDA
-    - Pass Success Rate
+    Get summary KPIs for dashboard (real data)
     """
     try:
-        # This is a placeholder - actual implementation will depend on your data structure
-        # In a real implementation, we would fetch data and calculate metrics
-        
+        # Load all matches for the team/competition/season
+        events = fdm.get_events_for_team(
+            team_id=team_id, competition_id=competition_id, season_id=season_id
+        )
+        if events is None or len(events) == 0:
+            return {"metrics": {}, "competition_id": competition_id, "team_id": team_id, "season_id": season_id}
+        metrics = calculate_basic_match_metrics(events)
+        # Use the first team in the metrics dict if team_id is None
+        team_key = team_id if team_id in metrics else (list(metrics.keys())[0] if metrics else None)
+        team_metrics = metrics.get(team_key, {})
         return {
             "metrics": {
-                "goals": 35,
-                "xG": 32.7,
-                "possession": 58.4,
-                "ppda": 8.3,
-                "pass_success": 87.2
+                "goals": team_metrics.get("goals", 0),
+                "xG": team_metrics.get("xg", 0),
+                "possession": team_metrics.get("possession_pct", 0),
+                "ppda": team_metrics.get("ppda", 0),
+                "pass_success": team_metrics.get("pass_completion", 0)
             },
             "competition_id": competition_id,
             "team_id": team_id,
@@ -55,23 +56,35 @@ async def get_xg_timeline(
     fdm: FootballDataManager = Depends(get_data_manager)
 ):
     """
-    Get xG vs Goals timeline for dashboard
-    
-    Returns data for xG vs actual goals chart over time
+    Get xG vs Goals timeline for dashboard (real data)
     """
     try:
-        # Placeholder response
+        matches = fdm.get_matches_for_team(team_id, competition_id, season_id)
+        timeline = []
+        cumulative_xg = []
+        cumulative_goals = []
+        total_xg = 0
+        total_goals = 0
+        for match in matches:
+            events = fdm.get_events(match["match_id"])
+            metrics = calculate_basic_match_metrics(events)
+            team_name = match["team_name"] if "team_name" in match else team_id
+            team_metrics = metrics.get(team_name, {})
+            xg = team_metrics.get("xg", 0)
+            goals = team_metrics.get("goals", 0)
+            timeline.append({
+                "match_id": match["match_id"],
+                "opponent": match.get("opponent", "N/A"),
+                "xg": xg,
+                "goals": goals
+            })
+            total_xg += xg
+            total_goals += goals
+            cumulative_xg.append(total_xg)
+            cumulative_goals.append(total_goals)
         return {
-            "matches": [
-                {"match_id": 1, "opponent": "Team A", "xg": 2.3, "goals": 2},
-                {"match_id": 2, "opponent": "Team B", "xg": 1.5, "goals": 1},
-                {"match_id": 3, "opponent": "Team C", "xg": 0.8, "goals": 0},
-                {"match_id": 4, "opponent": "Team D", "xg": 2.1, "goals": 3},
-            ],
-            "cumulative": {
-                "xg": [2.3, 3.8, 4.6, 6.7],
-                "goals": [2, 3, 3, 6]
-            }
+            "matches": timeline,
+            "cumulative": {"xg": cumulative_xg, "goals": cumulative_goals}
         }
     except Exception as e:
         logger.error(f"Error getting xG timeline: {str(e)}")
@@ -85,20 +98,27 @@ async def get_shot_map(
     fdm: FootballDataManager = Depends(get_data_manager)
 ):
     """
-    Get shot map data for dashboard
-    
-    Returns shot locations, xG values and outcomes
+    Get shot map data for dashboard (real data)
     """
     try:
-        # Placeholder response
-        return {
-            "shots": [
-                {"x": 105, "y": 35, "xg": 0.2, "outcome": "Goal", "minute": 23, "player": "Player A"},
-                {"x": 90, "y": 42, "xg": 0.1, "outcome": "Saved", "minute": 45, "player": "Player B"},
-                {"x": 110, "y": 40, "xg": 0.7, "outcome": "Goal", "minute": 67, "player": "Player C"},
-                {"x": 95, "y": 30, "xg": 0.05, "outcome": "Off Target", "minute": 78, "player": "Player D"},
-            ]
-        }
+        if match_id:
+            events = fdm.get_events(match_id)
+        else:
+            events = fdm.get_events_for_team(team_id=team_id, competition_id=competition_id)
+        if events is None or len(events) == 0:
+            return {"shots": []}
+        shots = events[(events["team"] == team_id) & (events["type"] == "Shot")]
+        shot_list = []
+        for _, shot in shots.iterrows():
+            shot_list.append({
+                "x": shot["location"][0] if isinstance(shot["location"], list) else None,
+                "y": shot["location"][1] if isinstance(shot["location"], list) else None,
+                "xg": shot.get("shot_statsbomb_xg", 0),
+                "outcome": shot.get("shot_outcome", "Unknown"),
+                "minute": shot.get("minute", None),
+                "player": shot.get("player", None)
+            })
+        return {"shots": shot_list}
     except Exception as e:
         logger.error(f"Error getting shot map: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")

@@ -2,6 +2,8 @@ from fastapi import APIRouter, HTTPException, Query, Depends
 from typing import List, Dict, Any, Optional
 import logging
 from app.util.football_data_manager import FootballDataManager
+from app.services.metric_calculator import calculate_xt_added
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -23,159 +25,75 @@ async def get_player_profile(
     Returns player info, key metrics, and performance summary
     """
     try:
-        # Generate player info (in real implementation would get from DB)
+        # Gather all matches for the player in the competition/season
+        matches = []
+        if competition_id and season_id:
+            matches_df = fdm.get_matches(competition_id, season_id)
+            for _, match in matches_df.iterrows():
+                events = fdm.get_events(match['match_id'])
+                if player_id in events['player'].unique():
+                    matches.append((match, events))
+        if not matches:
+            return {"error": "No data found for player."}
+        
+        # Aggregate player info and metrics
+        all_events = pd.concat([ev for _, ev in matches])
+        player_events = all_events[all_events['player'] == player_id]
+        
+        # Basic info (fallbacks if not available)
+        first_event = player_events.iloc[0]
         player_info = {
             "player_id": player_id,
-            "name": f"Player {player_id}",
-            "team": f"Team {player_id % 10}",
-            "age": 20 + (player_id % 15),
-            "nationality": "Country " + chr(65 + (player_id % 26)),
-            "position": "Forward" if player_id % 4 == 0 else 
-                       "Midfielder" if player_id % 4 == 1 else 
-                       "Defender" if player_id % 4 == 2 else "Goalkeeper",
-            "preferred_foot": "Right" if player_id % 3 != 0 else "Left",
-            "height": 175 + (player_id % 30),
-            "contract_expires": f"202{4 + (player_id % 4)}"
+            "name": first_event.get("player", f"Player {player_id}"),
+            "team": first_event.get("team", "Unknown"),
+            "position": first_event.get("position", "Unknown"),
         }
         
-        # Generate playing time data
+        # Playing time
+        minutes_played = player_events['minute'].sum()  # Approximation
+        matches_played = player_events['match_id'].nunique()
         playing_time = {
-            "matches_played": 20 + (player_id % 15),
-            "matches_started": 15 + (player_id % 20),
-            "minutes_played": 1500 + (player_id % 1500),
-            "minutes_per_match": 75 + (player_id % 20),
-            "matches_completed": 10 + (player_id % 15)
+            "matches_played": matches_played,
+            "minutes_played": minutes_played,
+            "minutes_per_match": minutes_played / matches_played if matches_played > 0 else 0
         }
         
-        # Generate performance metrics based on position
-        performance_metrics = {}
+        # Performance metrics
+        goals = len(player_events[(player_events['type'] == 'Shot') & (player_events['shot_outcome'] == 'Goal')])
+        assists = len(player_events[player_events['type'] == 'Pass'])  # Placeholder: refine with assist logic
+        xg = player_events['shot_statsbomb_xg'].sum() if 'shot_statsbomb_xg' in player_events else 0
+        shots = len(player_events[player_events['type'] == 'Shot'])
+        passes_completed = len(player_events[(player_events['type'] == 'Pass') & (player_events['pass_outcome'].isna())])
+        pass_accuracy = passes_completed / max(1, len(player_events[player_events['type'] == 'Pass'])) * 100
+        performance_metrics = {
+            "goals": goals,
+            "assists": assists,
+            "xg": xg,
+            "shots": shots,
+            "passes_completed": passes_completed,
+            "pass_accuracy": pass_accuracy
+        }
         
-        if player_info["position"] == "Forward":
-            performance_metrics = {
-                "goals": 8 + (player_id % 15),
-                "assists": 4 + (player_id % 8),
-                "xg": 7.5 + (player_id % 10) * 0.5,
-                "xa": 3.5 + (player_id % 7) * 0.5,
-                "shots": 45 + (player_id % 30),
-                "shots_on_target": 20 + (player_id % 15),
-                "shot_accuracy": 40 + (player_id % 25),
-                "conversion_rate": 15 + (player_id % 10),
-                "successful_dribbles": 25 + (player_id % 20),
-                "key_passes": 15 + (player_id % 20),
-                "penalties_scored": 1 + (player_id % 3),
-                "penalties_taken": 1 + (player_id % 4)
-            }
-        elif player_info["position"] == "Midfielder":
-            performance_metrics = {
-                "goals": 3 + (player_id % 8),
-                "assists": 5 + (player_id % 10),
-                "xg": 2.5 + (player_id % 6) * 0.5,
-                "xa": 4.5 + (player_id % 8) * 0.5,
-                "passes_completed": 800 + (player_id % 400),
-                "pass_accuracy": 80 + (player_id % 15),
-                "key_passes": 25 + (player_id % 25),
-                "progressive_passes": 120 + (player_id % 80),
-                "successful_dribbles": 30 + (player_id % 25),
-                "tackles_won": 40 + (player_id % 30),
-                "interceptions": 30 + (player_id % 20),
-                "ball_recoveries": 80 + (player_id % 50)
-            }
-        elif player_info["position"] == "Defender":
-            performance_metrics = {
-                "goals": 1 + (player_id % 4),
-                "assists": 2 + (player_id % 5),
-                "xg": 1.0 + (player_id % 3) * 0.5,
-                "xa": 1.5 + (player_id % 4) * 0.5,
-                "clean_sheets": 5 + (player_id % 10),
-                "tackles_won": 60 + (player_id % 40),
-                "interceptions": 50 + (player_id % 30),
-                "clearances": 80 + (player_id % 50),
-                "blocks": 30 + (player_id % 20),
-                "aerial_duels_won": 70 + (player_id % 50),
-                "pass_accuracy": 75 + (player_id % 15),
-                "errors_leading_to_shot": (player_id % 5)
-            }
-        else:  # Goalkeeper
-            performance_metrics = {
-                "clean_sheets": 5 + (player_id % 10),
-                "saves": 70 + (player_id % 50),
-                "save_percentage": 65 + (player_id % 25),
-                "goals_conceded": 20 + (player_id % 15),
-                "penalties_saved": 1 + (player_id % 2),
-                "penalties_faced": 3 + (player_id % 5),
-                "passes_attempted": 450 + (player_id % 250),
-                "pass_accuracy": 70 + (player_id % 20),
-                "catches": 15 + (player_id % 20),
-                "punches": 8 + (player_id % 10),
-                "high_claims": 12 + (player_id % 15),
-                "errors_leading_to_goal": (player_id % 3)
-            }
+        # Per 90 metrics
+        per_90_metrics = {k + '_per_90': v / (minutes_played / 90) if minutes_played > 0 else 0 for k, v in performance_metrics.items()}
         
-        # Calculate per 90 metrics
-        per_90_metrics = {}
-        minutes_per_90 = playing_time["minutes_played"] / 90
-        
-        for key, value in performance_metrics.items():
-            # Only calculate per 90 for count metrics, not percentages
-            if key not in ["pass_accuracy", "shot_accuracy", "conversion_rate", "save_percentage"]:
-                per_90_metrics[f"{key}_per_90"] = value / minutes_per_90
-        
-        # Generate percentile rankings (comparison to other players in position)
-        percentile_rankings = {}
-        import random
-        random.seed(player_id)
-        
-        for key in performance_metrics:
-            # Generate random percentile between 50-99 for better visualization
-            percentile_rankings[key] = 50 + random.randint(0, 49)
-        
-        # Generate form data (last 5 matches)
+        # Form (last 5 matches)
         form_data = []
-        for i in range(5):
-            match_data = {
-                "match_id": 1000 + i,
-                "opponent": f"Opponent {player_id % 20 + i}",
-                "result": "W" if i % 3 == 0 else "D" if i % 3 == 1 else "L",
-                "minutes_played": 90 if i % 4 != 0 else 70 + (i * 5),
-                "rating": 6.5 + (i % 4) * 0.5 + random.random(),
-                "goals": 1 if i % 3 == 0 and player_info["position"] != "Goalkeeper" else 0,
-                "assists": 1 if i % 4 == 1 and player_info["position"] not in ["Goalkeeper", "Defender"] else 0
-            }
-            
-            # Add position-specific metrics
-            if player_info["position"] == "Forward":
-                match_data.update({
-                    "shots": 2 + i,
-                    "shots_on_target": 1 if i % 2 == 0 else 0,
-                    "xg": 0.3 + (i * 0.1)
-                })
-            elif player_info["position"] == "Midfielder":
-                match_data.update({
-                    "key_passes": 1 + i,
-                    "pass_accuracy": 75 + (i * 3),
-                    "tackles": 2 + (i % 3)
-                })
-            elif player_info["position"] == "Defender":
-                match_data.update({
-                    "tackles": 3 + i,
-                    "interceptions": 2 + (i % 3),
-                    "clearances": 4 + (i * 2)
-                })
-            else:  # Goalkeeper
-                match_data.update({
-                    "saves": 2 + i,
-                    "goals_conceded": 1 if i % 2 == 0 else 0,
-                    "clean_sheet": i % 2 == 1
-                })
-            
-            form_data.append(match_data)
+        for match_id in player_events['match_id'].drop_duplicates().tail(5):
+            match_events = player_events[player_events['match_id'] == match_id]
+            form_data.append({
+                "match_id": match_id,
+                "goals": len(match_events[(match_events['type'] == 'Shot') & (match_events['shot_outcome'] == 'Goal')]),
+                "shots": len(match_events[match_events['type'] == 'Shot']),
+                "passes_completed": len(match_events[(match_events['type'] == 'Pass') & (match_events['pass_outcome'].isna())]),
+                "minutes_played": match_events['minute'].sum()
+            })
         
         return {
             "player_info": player_info,
             "playing_time": playing_time,
             "performance_metrics": performance_metrics,
             "per_90_metrics": per_90_metrics,
-            "percentile_rankings": percentile_rankings,
             "form": form_data,
             "competition_id": competition_id,
             "season_id": season_id
@@ -194,86 +112,67 @@ async def get_player_performance_trend(
 ):
     """
     Get player performance trend over time
-    
     Returns time series data for a specific metric
     """
     try:
-        import random
-        random.seed(player_id + hash(metric))
-        
-        # Generate timeline based on timeframe
+        matches = []
+        if competition_id:
+            # Assume only one season for simplicity
+            matches_df = fdm.get_matches(competition_id, None)
+            for _, match in matches_df.iterrows():
+                events = fdm.get_events(match['match_id'])
+                if player_id in events['player'].unique():
+                    matches.append((match, events))
+        if not matches:
+            return {"error": "No data found for player."}
+        # Determine number of matches for timeframe
         if timeframe == "season":
-            num_matches = 30
+            num_matches = len(matches)
         elif timeframe == "last10":
-            num_matches = 10
-        else:  # last5
-            num_matches = 5
-        
-        # Generate trend data
-        trend_data = []
-        
-        # Base value depends on metric
-        if metric == "goals":
-            base_value = 0.3
-            max_value = 3
-        elif metric == "assists":
-            base_value = 0.2
-            max_value = 2
-        elif metric == "xg":
-            base_value = 0.3
-            max_value = 1.2
-        elif metric == "shots":
-            base_value = 2.0
-            max_value = 8.0
-        elif metric == "key_passes":
-            base_value = 1.5
-            max_value = 6.0
-        elif metric == "tackles":
-            base_value = 2.0
-            max_value = 7.0
-        elif metric == "pass_accuracy":
-            base_value = 70.0
-            max_value = 100.0
+            num_matches = min(10, len(matches))
         else:
-            base_value = 1.0
-            max_value = 5.0
-        
-        # Generate data points with some randomness but maintaining a trend
-        trend_direction = random.choice([1, -1])  # Improving or declining
-        trend_factor = 0.05  # How strong the trend is
-        
-        for i in range(num_matches):
-            match_number = i + 1
-            # Calculate value with trend and random noise
-            trend_component = trend_direction * i * trend_factor * base_value
-            random_component = (random.random() - 0.5) * base_value
-            value = min(max(base_value + trend_component + random_component, 0), max_value)
-            
-            # Add data point
+            num_matches = min(5, len(matches))
+        matches = matches[-num_matches:]
+        # Aggregate metric per match
+        trend_data = []
+        for i, (match, events) in enumerate(matches):
+            player_events = events[events['player'] == player_id]
+            if metric == "goals":
+                value = len(player_events[(player_events['type'] == 'Shot') & (player_events['shot_outcome'] == 'Goal')])
+            elif metric == "assists":
+                value = len(player_events[player_events['type'] == 'Pass'])  # Placeholder: refine with assist logic
+            elif metric == "xg":
+                value = player_events['shot_statsbomb_xg'].sum() if 'shot_statsbomb_xg' in player_events else 0
+            elif metric == "shots":
+                value = len(player_events[player_events['type'] == 'Shot'])
+            elif metric == "key_passes":
+                value = len(player_events[player_events['type'] == 'Pass'])  # Placeholder: refine with key pass logic
+            elif metric == "tackles":
+                value = len(player_events[player_events['type'] == 'Duel'])
+            elif metric == "pass_accuracy":
+                passes = player_events[player_events['type'] == 'Pass']
+                completed = passes[passes['pass_outcome'].isna()]
+                value = len(completed) / max(1, len(passes)) * 100
+            else:
+                value = None
             trend_data.append({
-                "match_number": match_number,
-                "match_id": 1000 + i,
-                "opponent": f"Opponent {i + 1}",
+                "match_number": i + 1,
+                "match_id": match['match_id'],
+                "opponent": match.get('away_team', 'Unknown'),
                 "value": value,
-                "match_result": random.choice(["W", "D", "L"])
+                "match_result": match.get('result', None)
             })
-        
-        # Calculate rolling average
-        window_size = min(5, num_matches)
+        # Rolling average (window=5)
+        window_size = min(5, len(trend_data))
         rolling_avg = []
-        
-        for i in range(num_matches):
+        for i in range(len(trend_data)):
             if i < window_size - 1:
-                # Not enough data points for full window
                 continue
-                
-            # Calculate average of last window_size matches
             window_avg = sum(point["value"] for point in trend_data[i-(window_size-1):i+1]) / window_size
             rolling_avg.append({
                 "match_number": trend_data[i]["match_number"],
                 "value": window_avg
             })
-        
         return {
             "player_id": player_id,
             "metric": metric,
@@ -296,78 +195,51 @@ async def get_player_event_map(
 ):
     """
     Get player event map
-    
     Returns location data for player events for pitch visualization
     """
     try:
-        import random
-        random.seed(player_id)
-        
-        # Generate player position to influence event locations
-        player_position = random.choice(["Forward", "Midfielder", "Defender", "Goalkeeper"])
-        
-        # Number of events depends on event type
-        if event_type == "all":
-            num_events = 50
-        elif event_type == "passes":
-            num_events = 30
+        if match_id:
+            events = fdm.get_events(match_id)
+        elif competition_id:
+            matches_df = fdm.get_matches(competition_id, None)
+            all_events = []
+            for _, match in matches_df.iterrows():
+                ev = fdm.get_events(match['match_id'])
+                if player_id in ev['player'].unique():
+                    all_events.append(ev)
+            if not all_events:
+                return {"error": "No data found for player."}
+            events = pd.concat(all_events)
+        else:
+            return {"error": "No match or competition specified."}
+        player_events = events[events['player'] == player_id]
+        # Filter by event type
+        if event_type == "passes":
+            player_events = player_events[player_events['type'] == 'Pass']
         elif event_type == "shots":
-            num_events = 5 if player_position in ["Forward", "Midfielder"] else 1
-        else:  # defensive
-            num_events = 20 if player_position in ["Defender", "Midfielder"] else 5
-        
-        # Generate events
-        events = []
-        
-        for i in range(num_events):
-            # Generate location based on player position
-            if player_position == "Forward":
-                x = random.uniform(60, 115)
-                y = random.uniform(10, 70)
-            elif player_position == "Midfielder":
-                x = random.uniform(40, 90)
-                y = random.uniform(10, 70)
-            elif player_position == "Defender":
-                x = random.uniform(10, 60)
-                y = random.uniform(10, 70)
-            else:  # Goalkeeper
-                x = random.uniform(0, 30)
-                y = random.uniform(20, 60)
-            
-            # Determine specific event type
-            if event_type == "all":
-                specific_type = random.choice(["Pass", "Shot", "Tackle", "Interception", "Duel", "Ball Recovery"])
-            elif event_type == "passes":
-                specific_type = random.choice(["Short Pass", "Long Pass", "Cross", "Through Ball", "Key Pass"])
-            elif event_type == "shots":
-                specific_type = random.choice(["Shot", "Goal", "Shot on Target", "Shot off Target"])
-            else:  # defensive
-                specific_type = random.choice(["Tackle", "Interception", "Clearance", "Block", "Ball Recovery"])
-            
-            # Add success/failure status
-            success = random.random() > 0.3  # 70% success rate
-            
-            # Add event
-            events.append({
-                "id": i + 1,
-                "type": specific_type,
-                "x": x,
-                "y": y,
-                "success": success,
-                "minute": random.randint(1, 90),
-                # For passes, add end location
-                "end_x": x + random.uniform(5, 30) if "Pass" in specific_type else None,
-                "end_y": y + random.uniform(-15, 15) if "Pass" in specific_type else None
-            })
-        
+            player_events = player_events[player_events['type'] == 'Shot']
+        elif event_type == "defensive":
+            player_events = player_events[player_events['type'].isin(['Duel', 'Interception', 'Tackle', 'Block'])]
+        # Build event list
+        event_list = []
+        for _, row in player_events.iterrows():
+            event = {
+                "id": row.name,
+                "type": row['type'],
+                "x": row['location'][0] if isinstance(row['location'], list) else None,
+                "y": row['location'][1] if isinstance(row['location'], list) else None,
+                "minute": row['minute'],
+                "success": row.get('pass_outcome', None) is None if row['type'] == 'Pass' else None,
+                "end_x": row['pass_end_location'][0] if row['type'] == 'Pass' and isinstance(row.get('pass_end_location'), list) else None,
+                "end_y": row['pass_end_location'][1] if row['type'] == 'Pass' and isinstance(row.get('pass_end_location'), list) else None
+            }
+            event_list.append(event)
         return {
             "player_id": player_id,
-            "player_name": f"Player {player_id}",
-            "position": player_position,
             "event_type": event_type,
             "match_id": match_id,
             "competition_id": competition_id,
-            "events": events
+            "events": event_list
         }
     except Exception as e:
         logger.error(f"Error getting player event map: {str(e)}")
@@ -384,95 +256,72 @@ async def get_player_percentile_ranks(
 ):
     """
     Get player percentile rankings compared to position peers
-    
     Returns percentile ranks for various metrics
     """
     try:
-        import random
-        random.seed(player_id)
-        
-        # Determine player position if not specified
+        # Gather all matches for the competition/season
+        matches_df = fdm.get_matches(competition_id, season_id) if competition_id and season_id else None
+        all_events = []
+        if matches_df is not None:
+            for _, match in matches_df.iterrows():
+                all_events.append(fdm.get_events(match['match_id']))
+        if not all_events:
+            return {"error": "No data found for competition/season."}
+        events = pd.concat(all_events)
+        # Determine position group if not specified
         if not position_group:
-            position_group = random.choice(["Forward", "Midfielder", "Defender", "Goalkeeper"])
-        
-        # Define metrics based on position
-        if position_group == "Forward":
-            metrics = [
-                "goals", "assists", "xg", "xa", "shots", "shots_on_target", 
-                "shot_accuracy", "conversion_rate", "successful_dribbles", 
-                "key_passes", "progressive_carries", "touches_in_box"
-            ]
-        elif position_group == "Midfielder":
-            metrics = [
-                "goals", "assists", "xg", "xa", "passes_completed", 
-                "pass_accuracy", "key_passes", "progressive_passes", 
-                "successful_dribbles", "tackles_won", "interceptions", 
-                "ball_recoveries", "distance_covered"
-            ]
-        elif position_group == "Defender":
-            metrics = [
-                "clean_sheets", "tackles_won", "interceptions", "clearances", 
-                "blocks", "aerial_duels_won", "pass_accuracy", "progressive_passes", 
-                "errors_leading_to_shot", "ball_recoveries", "minutes_per_goal_conceded"
-            ]
-        else:  # Goalkeeper
-            metrics = [
-                "clean_sheets", "saves", "save_percentage", "goals_conceded", 
-                "penalties_saved", "passes_attempted", "pass_accuracy", 
-                "catches", "punches", "high_claims", "errors_leading_to_goal"
-            ]
-        
-        # Generate percentile ranks
-        percentile_ranks = {}
-        for metric in metrics:
-            percentile_ranks[metric] = random.randint(1, 99)
-        
-        # Include comparison metrics to show raw values
+            player_row = events[events['player'] == player_id].iloc[0]
+            position_group = player_row.get('position', 'Unknown')
+        # Filter to players in position group with min_minutes
+        player_minutes = events.groupby('player')['minute'].sum()
+        eligible_players = player_minutes[player_minutes >= min_minutes].index
+        group_events = events[(events['player'].isin(eligible_players)) & (events['position'] == position_group)]
+        # Define metrics
+        metrics = [
+            "goals", "assists", "xg", "shots", "passes_completed", "pass_accuracy"
+        ]
+        # Calculate raw values for all players
+        player_stats = {}
+        for player in group_events['player'].unique():
+            pe = group_events[group_events['player'] == player]
+            goals = len(pe[(pe['type'] == 'Shot') & (pe['shot_outcome'] == 'Goal')])
+            assists = len(pe[pe['type'] == 'Pass'])  # Placeholder
+            xg = pe['shot_statsbomb_xg'].sum() if 'shot_statsbomb_xg' in pe else 0
+            shots = len(pe[pe['type'] == 'Shot'])
+            passes_completed = len(pe[(pe['type'] == 'Pass') & (pe['pass_outcome'].isna())])
+            pass_accuracy = passes_completed / max(1, len(pe[pe['type'] == 'Pass'])) * 100
+            player_stats[player] = {
+                "goals": goals,
+                "assists": assists,
+                "xg": xg,
+                "shots": shots,
+                "passes_completed": passes_completed,
+                "pass_accuracy": pass_accuracy
+            }
+        # Calculate percentiles for the requested player
+        import numpy as np
+        percentiles = {}
         comparison_values = {}
         for metric in metrics:
-            # Generate reasonable values based on metric
-            if metric == "goals":
-                comparison_values[metric] = {
-                    "player": random.randint(5, 25),
-                    "average": 10.5,
-                    "max": 30
-                }
-            elif metric == "assists":
-                comparison_values[metric] = {
-                    "player": random.randint(3, 15),
-                    "average": 7.2,
-                    "max": 20
-                }
-            elif metric == "xg":
-                comparison_values[metric] = {
-                    "player": round(random.uniform(5.0, 20.0), 2),
-                    "average": 9.8,
-                    "max": 25.5
-                }
-            elif metric in ["pass_accuracy", "shot_accuracy", "conversion_rate", "save_percentage"]:
-                comparison_values[metric] = {
-                    "player": random.randint(60, 95),
-                    "average": 78.5,
-                    "max": 97
-                }
-            else:
-                comparison_values[metric] = {
-                    "player": random.randint(10, 100),
-                    "average": 42.5,
-                    "max": 120
-                }
-        
+            values = np.array([stats[metric] for stats in player_stats.values()])
+            player_value = player_stats.get(player_id, {}).get(metric, 0)
+            percentile = float(np.sum(values < player_value)) / len(values) * 100 if len(values) > 0 else 0
+            percentiles[metric] = percentile
+            comparison_values[metric] = {
+                "player": player_value,
+                "average": float(np.mean(values)) if len(values) > 0 else 0,
+                "max": float(np.max(values)) if len(values) > 0 else 0
+            }
         return {
             "player_id": player_id,
-            "player_name": f"Player {player_id}",
             "position_group": position_group,
-            "percentile_ranks": percentile_ranks,
+            "percentile_ranks": percentiles,
             "comparison_values": comparison_values,
             "metrics": metrics,
             "competition_id": competition_id,
             "season_id": season_id,
             "min_minutes": min_minutes,
-            "comparison_group_size": random.randint(30, 100)  # Number of players in comparison group
+            "comparison_group_size": len(player_stats)
         }
     except Exception as e:
         logger.error(f"Error getting player percentile ranks: {str(e)}")

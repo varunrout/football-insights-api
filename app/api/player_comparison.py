@@ -2,6 +2,9 @@ from fastapi import APIRouter, HTTPException, Query, Depends
 from typing import List, Dict, Any, Optional
 import logging
 from app.util.football_data_manager import FootballDataManager
+from app.services.metric_calculator import calculate_xt_added
+import pandas as pd
+import numpy as np
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -25,43 +28,64 @@ async def get_player_radar_comparison(
     Returns normalized metrics for multiple players in a format suitable for radar charts
     """
     try:
-        # Default metrics if none specified
         if not metrics:
             metrics = [
                 "goals_per_90", "assists_per_90", "xg_per_90", "xa_per_90", 
                 "progressive_passes_per_90", "successful_dribbles_per_90",
                 "defensive_actions_per_90", "pressures_per_90"
             ]
-        
-        # Placeholder response with sample data
+        # Gather all matches for the competition/season
+        matches_df = fdm.get_matches(competition_id, season_id) if competition_id and season_id else None
+        all_events = []
+        if matches_df is not None:
+            for _, match in matches_df.iterrows():
+                all_events.append(fdm.get_events(match['match_id']))
+        if not all_events:
+            return {"error": "No data found for competition/season."}
+        events = pd.concat(all_events)
         player_data = []
         for player_id in player_ids:
-            # In a real implementation, this would fetch actual player data
+            pe = events[events['player'] == player_id]
+            minutes = pe['minute'].sum()
+            # Calculate metrics
+            goals = len(pe[(pe['type'] == 'Shot') & (pe['shot_outcome'] == 'Goal')])
+            assists = len(pe[pe['type'] == 'Pass'])  # Placeholder
+            xg = pe['shot_statsbomb_xg'].sum() if 'shot_statsbomb_xg' in pe else 0
+            # For advanced metrics, use pass/carry logic as needed
+            progressive_passes = len(pe[pe['type'] == 'Pass'])  # Placeholder
+            successful_dribbles = len(pe[pe['type'] == 'Carry'])  # Placeholder
+            defensive_actions = len(pe[pe['type'].isin(['Duel', 'Interception', 'Tackle', 'Block'])])
+            pressures = len(pe[pe['type'] == 'Pressure'])
+            # Per 90
+            per_90 = lambda v: v / (minutes / 90) if minutes > 0 else 0
+            player_metrics = {
+                "goals_per_90": per_90(goals),
+                "assists_per_90": per_90(assists),
+                "xg_per_90": per_90(xg),
+                "xa_per_90": 0,  # Placeholder
+                "progressive_passes_per_90": per_90(progressive_passes),
+                "successful_dribbles_per_90": per_90(successful_dribbles),
+                "defensive_actions_per_90": per_90(defensive_actions),
+                "pressures_per_90": per_90(pressures)
+            }
             player_data.append({
                 "player_id": player_id,
-                "player_name": f"Player {player_id}",
-                "team": f"Team {player_id % 5}",
-                "metrics": {
-                    "goals_per_90": 0.3 + (player_id % 5) * 0.1,
-                    "assists_per_90": 0.2 + (player_id % 4) * 0.1,
-                    "xg_per_90": 0.35 + (player_id % 3) * 0.15,
-                    "xa_per_90": 0.25 + (player_id % 4) * 0.12,
-                    "progressive_passes_per_90": 3.5 + (player_id % 10) * 0.5,
-                    "successful_dribbles_per_90": 1.2 + (player_id % 5) * 0.3,
-                    "defensive_actions_per_90": 5.0 + (player_id % 8) * 0.6,
-                    "pressures_per_90": 15.0 + (player_id % 7) * 1.2
-                }
+                "player_name": pe.iloc[0]["player"] if not pe.empty else f"Player {player_id}",
+                "team": pe.iloc[0]["team"] if not pe.empty else None,
+                "metrics": {k: player_metrics[k] for k in metrics}
             })
-        
-        # Generate min and max values for normalization
+        # Normalization
         metric_ranges = {}
         for metric in metrics:
             values = [p["metrics"].get(metric, 0) for p in player_data]
             metric_ranges[metric] = {
-                "min": min(values),
-                "max": max(values)
+                "min": float(np.min(values)),
+                "max": float(np.max(values))
             }
-        
+            if normalized and metric_ranges[metric]["max"] > metric_ranges[metric]["min"]:
+                for p in player_data:
+                    val = p["metrics"][metric]
+                    p["metrics"][metric] = (val - metric_ranges[metric]["min"]) / (metric_ranges[metric]["max"] - metric_ranges[metric]["min"])
         return {
             "players": player_data,
             "metrics": metrics,
@@ -87,35 +111,38 @@ async def get_player_bar_comparison(
     Returns data for a single metric across multiple players
     """
     try:
-        # Placeholder response with sample data
+        matches_df = fdm.get_matches(competition_id, season_id) if competition_id and season_id else None
+        all_events = []
+        if matches_df is not None:
+            for _, match in matches_df.iterrows():
+                all_events.append(fdm.get_events(match['match_id']))
+        if not all_events:
+            return {"error": "No data found for competition/season."}
+        events = pd.concat(all_events)
         player_data = []
         for player_id in player_ids:
-            # In a real implementation, this would fetch actual player data
-            value = 0.0
+            pe = events[events['player'] == player_id]
+            minutes = pe['minute'].sum()
+            # Calculate metric value
             if metric == "goals":
-                value = 5 + (player_id % 10)
+                value = len(pe[(pe['type'] == 'Shot') & (pe['shot_outcome'] == 'Goal')])
             elif metric == "assists":
-                value = 3 + (player_id % 7)
+                value = len(pe[pe['type'] == 'Pass'])  # Placeholder
             elif metric == "xg":
-                value = 5.5 + (player_id % 8) * 0.8
+                value = pe['shot_statsbomb_xg'].sum() if 'shot_statsbomb_xg' in pe else 0
             elif metric == "xa":
-                value = 3.2 + (player_id % 6) * 0.7
+                value = 0  # Placeholder
             else:
-                value = 10 + (player_id % 15)
-                
-            # Adjust to per 90 if requested
-            minutes = 1500 + (player_id % 800)  # Simulated minutes played
-            per_90_value = value / (minutes / 90) if per_90 else value
-                
+                value = len(pe)
+            per_90_value = value / (minutes / 90) if per_90 and minutes > 0 else value
             player_data.append({
                 "player_id": player_id,
-                "player_name": f"Player {player_id}",
-                "team": f"Team {player_id % 5}",
+                "player_name": pe.iloc[0]["player"] if not pe.empty else f"Player {player_id}",
+                "team": pe.iloc[0]["team"] if not pe.empty else None,
                 "value": value,
                 "per_90_value": per_90_value,
                 "minutes": minutes
             })
-        
         return {
             "players": player_data,
             "metric": metric,
@@ -142,41 +169,48 @@ async def get_player_scatter_comparison(
     Returns data for comparing all players in a competition across two metrics
     """
     try:
-        # Placeholder response with sample data for 40 players
+        matches_df = fdm.get_matches(competition_id, season_id)
+        all_events = []
+        for _, match in matches_df.iterrows():
+            all_events.append(fdm.get_events(match['match_id']))
+        if not all_events:
+            return {"error": "No data found for competition/season."}
+        events = pd.concat(all_events)
+        # Group by player
         players = []
-        for i in range(1, 41):
-            # Generate random-ish data for each player
-            player_id = 1000 + i
-            x_value = (i % 10) * 0.5 + (i % 7) * 0.3
-            y_value = (i % 8) * 0.4 + (i % 5) * 0.6
-            minutes = min_minutes + (i % 15) * 100
-            
-            # Determine position group
-            pos_groups = ["Forward", "Midfielder", "Defender", "Goalkeeper"]
-            player_position_group = pos_groups[i % 4]
-            
-            # Skip if filtered by position group
-            if position_group and player_position_group != position_group:
+        for player_id, pe in events.groupby('player'):
+            minutes = pe['minute'].sum()
+            if minutes < min_minutes:
                 continue
-            
-            # Determine if this player should be highlighted
+            if position_group and pe.iloc[0].get('position', None) != position_group:
+                continue
+            # Calculate metrics
+            def get_metric(metric):
+                if metric == "goals":
+                    return len(pe[(pe['type'] == 'Shot') & (pe['shot_outcome'] == 'Goal')])
+                elif metric == "assists":
+                    return len(pe[pe['type'] == 'Pass'])  # Placeholder
+                elif metric == "xg":
+                    return pe['shot_statsbomb_xg'].sum() if 'shot_statsbomb_xg' in pe else 0
+                elif metric == "xa":
+                    return 0  # Placeholder
+                else:
+                    return len(pe)
+            x_value = get_metric(x_metric)
+            y_value = get_metric(y_metric)
             is_highlighted = highlighted_player_ids and player_id in highlighted_player_ids
-            
             players.append({
                 "player_id": player_id,
-                "player_name": f"Player {player_id}",
-                "team": f"Team {i % 10}",
-                "position_group": player_position_group,
+                "player_name": pe.iloc[0]["player"] if not pe.empty else f"Player {player_id}",
+                "team": pe.iloc[0]["team"] if not pe.empty else None,
+                "position_group": pe.iloc[0].get('position', None),
                 "x_value": x_value,
                 "y_value": y_value,
                 "minutes": minutes,
                 "highlighted": is_highlighted
             })
-        
-        # Calculate league averages
-        x_avg = sum(p["x_value"] for p in players) / len(players) if players else 0
-        y_avg = sum(p["y_value"] for p in players) / len(players) if players else 0
-        
+        x_avg = float(np.mean([p["x_value"] for p in players])) if players else 0
+        y_avg = float(np.mean([p["y_value"] for p in players])) if players else 0
         return {
             "players": players,
             "x_metric": x_metric,
@@ -201,58 +235,78 @@ async def get_player_similarity_map(
 ):
     """
     Get player similarity map data
-    
     Returns a list of the most similar players to the reference player
     """
     try:
-        # Placeholder response with sample data
+        matches_df = fdm.get_matches(competition_id, season_id)
+        all_events = []
+        for _, match in matches_df.iterrows():
+            all_events.append(fdm.get_events(match['match_id']))
+        if not all_events:
+            return {"error": "No data found for competition/season."}
+        events = pd.concat(all_events)
+        # Calculate per-90 metrics for all players
+        metrics = [
+            "goals_per_90", "assists_per_90", "xg_per_90", "progressive_passes_per_90",
+            "successful_dribbles_per_90", "defensive_actions_per_90", "pressures_per_90"
+        ]
+        player_vectors = {}
+        for pid, pe in events.groupby('player'):
+            minutes = pe['minute'].sum()
+            if minutes < min_minutes:
+                continue
+            goals = len(pe[(pe['type'] == 'Shot') & (pe['shot_outcome'] == 'Goal')])
+            assists = len(pe[pe['type'] == 'Pass'])  # Placeholder
+            xg = pe['shot_statsbomb_xg'].sum() if 'shot_statsbomb_xg' in pe else 0
+            progressive_passes = len(pe[pe['type'] == 'Pass'])  # Placeholder
+            successful_dribbles = len(pe[pe['type'] == 'Carry'])  # Placeholder
+            defensive_actions = len(pe[pe['type'].isin(['Duel', 'Interception', 'Tackle', 'Block'])])
+            pressures = len(pe[pe['type'] == 'Pressure'])
+            per_90 = lambda v: v / (minutes / 90) if minutes > 0 else 0
+            player_vectors[pid] = np.array([
+                per_90(goals),
+                per_90(assists),
+                per_90(xg),
+                per_90(progressive_passes),
+                per_90(successful_dribbles),
+                per_90(defensive_actions),
+                per_90(pressures)
+            ])
+        # Reference player vector
+        ref_vector = player_vectors.get(player_id)
+        if ref_vector is None:
+            return {"error": "Reference player not found or insufficient minutes."}
+        # Calculate similarity (cosine similarity)
+        def cosine_similarity(a, b):
+            return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))) if np.linalg.norm(a) > 0 and np.linalg.norm(b) > 0 else 0
+        similarities = []
+        for pid, vec in player_vectors.items():
+            if pid == player_id:
+                continue
+            sim = cosine_similarity(ref_vector, vec)
+            similarities.append((pid, sim))
+        similarities.sort(key=lambda x: -x[1])
+        similar_players = []
+        for pid, sim in similarities[:limit]:
+            pe = events[events['player'] == pid]
+            similar_players.append({
+                "player_id": pid,
+                "player_name": pe.iloc[0]["player"] if not pe.empty else f"Player {pid}",
+                "team": pe.iloc[0]["team"] if not pe.empty else None,
+                "position": pe.iloc[0].get('position', None),
+                "minutes": pe['minute'].sum(),
+                "similarity_score": sim,
+                "key_metrics": {m: float(player_vectors[pid][i]) for i, m in enumerate(metrics)}
+            })
+        pe_ref = events[events['player'] == player_id]
         reference_player = {
             "player_id": player_id,
-            "player_name": f"Player {player_id}",
-            "team": f"Team {player_id % 10}",
-            "position": "Forward" if player_id % 4 == 0 else 
-                       "Midfielder" if player_id % 4 == 1 else 
-                       "Defender" if player_id % 4 == 2 else "Goalkeeper",
-            "minutes": 1800 + (player_id % 500),
-            "key_metrics": {
-                "goals_per_90": 0.45,
-                "assists_per_90": 0.23,
-                "xg_per_90": 0.52,
-                "xa_per_90": 0.31,
-                "progressive_passes_per_90": 4.2,
-                "successful_dribbles_per_90": 1.8,
-                "defensive_actions_per_90": 6.5,
-                "pressures_per_90": 18.3
-            }
+            "player_name": pe_ref.iloc[0]["player"] if not pe_ref.empty else f"Player {player_id}",
+            "team": pe_ref.iloc[0]["team"] if not pe_ref.empty else None,
+            "position": pe_ref.iloc[0].get('position', None),
+            "minutes": pe_ref['minute'].sum(),
+            "key_metrics": {m: float(ref_vector[i]) for i, m in enumerate(metrics)}
         }
-        
-        # Generate similar players with varying similarity scores
-        similar_players = []
-        for i in range(1, limit + 1):
-            similar_id = 1000 + (player_id + i) % 100
-            similarity_score = 0.95 - (i * 0.05)
-            
-            similar_player = {
-                "player_id": similar_id,
-                "player_name": f"Player {similar_id}",
-                "team": f"Team {similar_id % 10}",
-                "position": reference_player["position"],  # Same position for similarity
-                "minutes": 1500 + (similar_id % 800),
-                "similarity_score": similarity_score,
-                "key_metrics": {
-                    "goals_per_90": reference_player["key_metrics"]["goals_per_90"] * (1 + (i % 5 - 2) * 0.1),
-                    "assists_per_90": reference_player["key_metrics"]["assists_per_90"] * (1 + (i % 4 - 2) * 0.1),
-                    "xg_per_90": reference_player["key_metrics"]["xg_per_90"] * (1 + (i % 6 - 3) * 0.1),
-                    "xa_per_90": reference_player["key_metrics"]["xa_per_90"] * (1 + (i % 5 - 2) * 0.1),
-                    "progressive_passes_per_90": reference_player["key_metrics"]["progressive_passes_per_90"] * (1 + (i % 4 - 2) * 0.1),
-                    "successful_dribbles_per_90": reference_player["key_metrics"]["successful_dribbles_per_90"] * (1 + (i % 6 - 3) * 0.1),
-                    "defensive_actions_per_90": reference_player["key_metrics"]["defensive_actions_per_90"] * (1 + (i % 5 - 2) * 0.1),
-                    "pressures_per_90": reference_player["key_metrics"]["pressures_per_90"] * (1 + (i % 4 - 2) * 0.1)
-                }
-            }
-            
-            similar_players.append(similar_player)
-        
         return {
             "reference_player": reference_player,
             "similar_players": similar_players,

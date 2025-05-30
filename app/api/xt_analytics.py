@@ -1,8 +1,11 @@
 from fastapi import APIRouter, HTTPException, Query, Depends
 from typing import List, Dict, Any, Optional
 import logging
+import pandas as pd
+import numpy as np
 from app.util.football_data_manager import FootballDataManager
 from app.util.metrics.expected_threat import ExpectedThreatModel
+from app.services.metric_calculator import load_xt_model, calculate_xt_added, get_player_xt_contributions
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -19,25 +22,12 @@ async def get_xt_model():
     Returns the xT values for each grid cell on the pitch
     """
     try:
-        # This would normally load a trained model
-        # Placeholder response with sample data
+        xt_model = load_xt_model()
+        grid = xt_model.grid
         return {
-            "grid_size": {"x": 12, "y": 8},
+            "grid_size": {"x": xt_model.n_grid_cells_x, "y": xt_model.n_grid_cells_y},
             "pitch_dimensions": {"x": 120, "y": 80},
-            "grid_values": [
-                [0.001, 0.002, 0.003, 0.005, 0.008, 0.01, 0.01, 0.008],
-                [0.002, 0.003, 0.005, 0.008, 0.01, 0.015, 0.015, 0.01],
-                [0.003, 0.005, 0.008, 0.01, 0.02, 0.025, 0.025, 0.02],
-                [0.005, 0.008, 0.01, 0.02, 0.03, 0.04, 0.04, 0.03],
-                [0.008, 0.01, 0.02, 0.03, 0.05, 0.06, 0.06, 0.05],
-                [0.01, 0.015, 0.025, 0.04, 0.06, 0.08, 0.08, 0.06],
-                [0.015, 0.02, 0.03, 0.05, 0.08, 0.1, 0.1, 0.08],
-                [0.02, 0.03, 0.04, 0.07, 0.1, 0.15, 0.15, 0.1],
-                [0.03, 0.04, 0.06, 0.1, 0.15, 0.2, 0.2, 0.15],
-                [0.04, 0.06, 0.1, 0.15, 0.2, 0.3, 0.3, 0.2],
-                [0.06, 0.1, 0.15, 0.2, 0.3, 0.4, 0.4, 0.3],
-                [0.1, 0.15, 0.2, 0.3, 0.4, 0.6, 0.6, 0.4]
-            ]
+            "grid_values": grid.tolist()
         }
     except Exception as e:
         logger.error(f"Error getting xT model: {str(e)}")
@@ -57,16 +47,35 @@ async def get_player_xt_rankings(
     Returns players sorted by their xT contribution
     """
     try:
-        # Placeholder response
-        return {
-            "players": [
-                {"player_id": 1, "name": "Player A", "team": "Team 1", "total_xt": 4.2, "xt_per_90": 0.45, "minutes": 840},
-                {"player_id": 2, "name": "Player B", "team": "Team 2", "total_xt": 3.8, "xt_per_90": 0.42, "minutes": 810},
-                {"player_id": 3, "name": "Player C", "team": "Team 1", "total_xt": 3.5, "xt_per_90": 0.39, "minutes": 900},
-                {"player_id": 4, "name": "Player D", "team": "Team 3", "total_xt": 3.2, "xt_per_90": 0.36, "minutes": 720},
-                {"player_id": 5, "name": "Player E", "team": "Team 2", "total_xt": 2.9, "xt_per_90": 0.32, "minutes": 810}
-            ]
-        }
+        # Gather all matches for the competition/season/team
+        matches = fdm.get_matches(competition_id, season_id)
+        all_events = []
+        for _, match in matches.iterrows():
+            if team_id is not None and match['home_team_id'] != team_id and match['away_team_id'] != team_id:
+                continue
+            events = fdm.get_events(match['match_id'])
+            all_events.append(events)
+        if not all_events:
+            return {"players": []}
+        events_df = pd.concat(all_events)
+        # Calculate player xT contributions
+        player_xt_df = get_player_xt_contributions(events_df)
+        # Filter by min_minutes if possible (fallback to min_actions)
+        # Here, positive_actions is a proxy for minutes if minutes not available
+        player_xt_df = player_xt_df[player_xt_df['positive_actions'] >= min_minutes // 10]  # Approx: 10 actions per 90 min
+        # Sort and format
+        player_xt_df = player_xt_df.sort_values("total_xt_added", ascending=False)
+        players = [
+            {
+                "player": row["player"],
+                "team": row["team"],
+                "total_xt": row["total_xt_added"],
+                "xt_per_action": row["avg_xt_per_action"],
+                "positive_actions": row["positive_actions"]
+            }
+            for _, row in player_xt_df.iterrows()
+        ]
+        return {"players": players}
     except Exception as e:
         logger.error(f"Error getting player xT rankings: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
@@ -84,16 +93,24 @@ async def get_xt_pass_map(
     Returns passes with xT values for visualization
     """
     try:
-        # Placeholder response
-        return {
-            "passes": [
-                {"player_id": 1, "player_name": "Player A", "start_x": 35, "start_y": 30, "end_x": 70, "end_y": 40, "xt_value": 0.08},
-                {"player_id": 2, "player_name": "Player B", "start_x": 50, "start_y": 20, "end_x": 85, "end_y": 30, "xt_value": 0.12},
-                {"player_id": 3, "player_name": "Player C", "start_x": 70, "start_y": 40, "end_x": 95, "end_y": 45, "xt_value": 0.18},
-                {"player_id": 1, "player_name": "Player A", "start_x": 60, "start_y": 10, "end_x": 90, "end_y": 5, "xt_value": 0.09},
-                {"player_id": 4, "player_name": "Player D", "start_x": 80, "start_y": 30, "end_x": 105, "end_y": 40, "xt_value": 0.25}
-            ]
-        }
+        events = fdm.get_events(match_id)
+        xt_model = load_xt_model()
+        events_with_xt = calculate_xt_added(events, xt_model)
+        passes = events_with_xt[(events_with_xt['type'] == 'Pass') & (events_with_xt['xt_added'] >= min_xt)]
+        if team_id is not None:
+            passes = passes[passes['team'] == team_id]
+        pass_list = []
+        for _, row in passes.iterrows():
+            pass_list.append({
+                "player": row.get("player"),
+                "team": row.get("team"),
+                "start_x": row["location"][0] if isinstance(row["location"], list) else None,
+                "start_y": row["location"][1] if isinstance(row["location"], list) else None,
+                "end_x": row["pass_end_location"][0] if isinstance(row["pass_end_location"], list) else None,
+                "end_y": row["pass_end_location"][1] if isinstance(row["pass_end_location"], list) else None,
+                "xt_value": row["xt_added"]
+            })
+        return {"passes": pass_list}
     except Exception as e:
         logger.error(f"Error getting xT pass map: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
@@ -111,37 +128,53 @@ async def get_team_xt_contribution(
     Returns xT contribution by team areas and phases of play
     """
     try:
-        # Placeholder response
+        xt_model = load_xt_model()
+        if match_id:
+            events = fdm.get_events(match_id)
+        else:
+            # Aggregate all matches for the team in the competition
+            matches = fdm.get_matches(competition_id, None)
+            all_events = []
+            for _, match in matches.iterrows():
+                if match['home_team_id'] == team_id or match['away_team_id'] == team_id:
+                    all_events.append(fdm.get_events(match['match_id']))
+            if not all_events:
+                return {}
+            events = pd.concat(all_events)
+        # Filter for team
+        team_events = events[events['team'] == team_id]
+        xt_events = calculate_xt_added(team_events, xt_model)
+        # By zone (vertical thirds)
+        def get_zone(x):
+            if x < 40:
+                return 'defensive_third'
+            elif x < 80:
+                return 'middle_third'
+            else:
+                return 'final_third'
+        xt_events = xt_events.copy()
+        xt_events['zone'] = xt_events['location'].apply(lambda loc: get_zone(loc[0]) if isinstance(loc, list) else None)
+        by_zone = xt_events.groupby('zone')['xt_added'].sum().to_dict()
+        # By player
+        by_player = xt_events.groupby('player')['xt_added'].sum().reset_index().rename(columns={'xt_added': 'xt'})
+        by_player = by_player.sort_values('xt', ascending=False).to_dict(orient='records')
+        # By action type
+        by_action_type = xt_events.groupby('type')['xt_added'].sum().to_dict()
+        # By time period (15-min bins)
+        xt_events['period'] = xt_events['minute'].apply(lambda m: (m // 15) * 15)
+        by_time_period = xt_events.groupby('period')['xt_added'].sum().reset_index()
+        by_time_period = [
+            {"period": f"{int(row['period'])+1}-{int(row['period'])+15}", "xt": row['xt_added']} for _, row in by_time_period.iterrows()
+        ]
         return {
             "team_id": team_id,
             "competition_id": competition_id,
             "match_id": match_id,
-            "total_xt": 14.2,
-            "by_zone": {
-                "defensive_third": 1.2,
-                "middle_third": 4.8,
-                "final_third": 8.2
-            },
-            "by_player": [
-                {"player_id": 1, "player_name": "Player A", "xt": 3.2},
-                {"player_id": 2, "player_name": "Player B", "xt": 2.8},
-                {"player_id": 3, "player_name": "Player C", "xt": 2.5},
-                {"player_id": 4, "player_name": "Player D", "xt": 2.1},
-                {"player_id": 5, "player_name": "Player E", "xt": 1.9}
-            ],
-            "by_action_type": {
-                "passes": 8.5,
-                "carries": 4.2,
-                "take_ons": 1.5
-            },
-            "by_time_period": [
-                {"period": "0-15", "xt": 1.2},
-                {"period": "16-30", "xt": 1.8},
-                {"period": "31-45", "xt": 2.3},
-                {"period": "46-60", "xt": 3.1},
-                {"period": "61-75", "xt": 2.7},
-                {"period": "76-90", "xt": 3.1}
-            ]
+            "total_xt": xt_events['xt_added'].sum(),
+            "by_zone": by_zone,
+            "by_player": by_player,
+            "by_action_type": by_action_type,
+            "by_time_period": by_time_period
         }
     except Exception as e:
         logger.error(f"Error getting team xT contribution: {str(e)}")
@@ -160,35 +193,45 @@ async def get_zone_effectiveness(
     Returns xT effectiveness by pitch zone
     """
     try:
-        # Placeholder response
+        xt_model = load_xt_model()
+        if match_id:
+            events = fdm.get_events(match_id)
+        else:
+            matches = fdm.get_matches(competition_id, None)
+            all_events = []
+            for _, match in matches.iterrows():
+                if team_id is None or match['home_team_id'] == team_id or match['away_team_id'] == team_id:
+                    all_events.append(fdm.get_events(match['match_id']))
+            if not all_events:
+                return {}
+            events = pd.concat(all_events)
+        if team_id is not None:
+            events = events[events['team'] == team_id]
+        xt_events = calculate_xt_added(events, xt_model)
+        # Define 4x6 grid
+        grid_x, grid_y = 6, 4
+        x_bins = np.linspace(0, 120, grid_x + 1)
+        y_bins = np.linspace(0, 80, grid_y + 1)
+        xt_events = xt_events[xt_events['type'].isin(['Pass', 'Carry'])]
+        xt_events = xt_events[xt_events['location'].apply(lambda loc: isinstance(loc, list) and len(loc) == 2)]
+        xt_events['zone_x'] = xt_events['location'].apply(lambda loc: np.digitize(loc[0], x_bins) - 1)
+        xt_events['zone_y'] = xt_events['location'].apply(lambda loc: np.digitize(loc[1], y_bins) - 1)
         pitch_zones = []
-        
-        # Create 4x6 grid of zones
-        for i in range(4):  # 4 vertical zones
-            for j in range(6):  # 6 horizontal zones
-                zone_x = j * 20
-                zone_y = i * 20
-                
-                # Effectiveness increases as we move up the pitch
-                effectiveness = (j + 1) * 20
-                
-                # Add some variation
-                import random
-                random.seed(f"{team_id}_{i}_{j}")
-                variation = random.uniform(-10, 10)
-                effectiveness = max(0, min(100, effectiveness + variation))
-                
+        for i in range(grid_y):
+            for j in range(grid_x):
+                zone_events = xt_events[(xt_events['zone_x'] == j) & (xt_events['zone_y'] == i)]
+                effectiveness = zone_events['xt_added'].sum()
+                actions = len(zone_events)
                 pitch_zones.append({
                     "zone_id": f"{i+1}_{j+1}",
-                    "x_start": zone_x,
-                    "y_start": zone_y,
-                    "x_end": zone_x + 20,
-                    "y_end": zone_y + 20,
+                    "x_start": x_bins[j],
+                    "y_start": y_bins[i],
+                    "x_end": x_bins[j+1],
+                    "y_end": y_bins[i+1],
                     "effectiveness": effectiveness,
-                    "xt_generated": (j + 1) * (i + 1) * 0.15,
-                    "actions": (j + 1) * (i + 1) * 10
+                    "xt_generated": effectiveness,
+                    "actions": actions
                 })
-        
         return {
             "team_id": team_id,
             "competition_id": competition_id,

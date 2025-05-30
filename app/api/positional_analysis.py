@@ -2,6 +2,8 @@ from fastapi import APIRouter, HTTPException, Query, Depends
 from typing import List, Dict, Any, Optional
 import logging
 from app.util.football_data_manager import FootballDataManager
+import pandas as pd
+import numpy as np
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -20,50 +22,50 @@ async def get_role_analysis(
 ):
     """
     Get role analysis data for a specific position
-    
     Returns metrics and player clusters for the specified position
     """
     try:
-        # Map of position to specialized roles
-        position_roles = {
-            "Forward": ["Target Man", "False 9", "Inside Forward", "Winger"],
-            "Midfielder": ["Deep-Lying Playmaker", "Box-to-Box", "Attacking Midfielder", "Defensive Midfielder"],
-            "Defender": ["Ball-Playing CB", "Defensive CB", "Attacking FB", "Defensive FB"],
-            "Goalkeeper": ["Sweeper Keeper", "Traditional Keeper"]
-        }
-        
-        # Get roles for the requested position
-        roles = position_roles.get(position, [])
-        
-        # Generate sample players for each role
-        players_by_role = {}
-        for role in roles:
-            players = []
-            for i in range(1, 6):  # 5 players per role
-                player_id = 1000 + len(players_by_role) * 10 + i
-                players.append({
-                    "player_id": player_id,
-                    "player_name": f"Player {player_id}",
-                    "team": f"Team {player_id % 10}",
-                    "minutes": min_minutes + (i * 200),
-                    "role_score": 0.8 + (i * 0.03),  # How well they fit the role
-                    "key_metrics": generate_metrics_for_role(role)
-                })
-            players_by_role[role] = players
-        
-        # Generate role definitions
-        role_definitions = {}
-        for role in roles:
-            role_definitions[role] = {
-                "description": f"Players who primarily {role_description(role)}",
-                "key_metrics": key_metrics_for_role(role)
-            }
-        
+        matches_df = fdm.get_matches(competition_id, season_id)
+        all_events = []
+        for _, match in matches_df.iterrows():
+            all_events.append(fdm.get_events(match['match_id']))
+        if not all_events:
+            return {"error": "No data found for competition/season."}
+        events = pd.concat(all_events)
+        # Filter to players in position group with min_minutes
+        player_minutes = events.groupby('player')['minute'].sum()
+        eligible_players = player_minutes[player_minutes >= min_minutes].index
+        group_events = events[(events['player'].isin(eligible_players)) & (events['position'] == position)]
+        # Calculate per-90 metrics for each player
+        player_data = []
+        for player_id, pe in group_events.groupby('player'):
+            minutes = pe['minute'].sum()
+            goals = len(pe[(pe['type'] == 'Shot') & (pe['shot_outcome'] == 'Goal')])
+            assists = len(pe[pe['type'] == 'Pass'])  # Placeholder
+            xg = pe['shot_statsbomb_xg'].sum() if 'shot_statsbomb_xg' in pe else 0
+            progressive_passes = len(pe[pe['type'] == 'Pass'])  # Placeholder
+            successful_dribbles = len(pe[pe['type'] == 'Carry'])  # Placeholder
+            defensive_actions = len(pe[pe['type'].isin(['Duel', 'Interception', 'Tackle', 'Block'])])
+            pressures = len(pe[pe['type'] == 'Pressure'])
+            per_90 = lambda v: v / (minutes / 90) if minutes > 0 else 0
+            player_data.append({
+                "player_id": player_id,
+                "player_name": pe.iloc[0]["player"] if not pe.empty else f"Player {player_id}",
+                "team": pe.iloc[0]["team"] if not pe.empty else None,
+                "minutes": minutes,
+                "key_metrics": {
+                    "goals_per_90": per_90(goals),
+                    "assists_per_90": per_90(assists),
+                    "xg_per_90": per_90(xg),
+                    "progressive_passes_per_90": per_90(progressive_passes),
+                    "successful_dribbles_per_90": per_90(successful_dribbles),
+                    "defensive_actions_per_90": per_90(defensive_actions),
+                    "pressures_per_90": per_90(pressures)
+                }
+            })
         return {
             "position": position,
-            "roles": roles,
-            "role_definitions": role_definitions,
-            "players_by_role": players_by_role,
+            "players": player_data,
             "competition_id": competition_id,
             "season_id": season_id,
             "min_minutes": min_minutes
@@ -82,56 +84,89 @@ async def get_zone_analysis(
 ):
     """
     Get zone analysis data for a team
-    
     Returns metrics by pitch zone (vertical thirds, horizontal thirds, or grid)
     """
     try:
-        # Determine zones based on type
+        if match_id:
+            events = fdm.get_events(match_id)
+        elif competition_id:
+            matches_df = fdm.get_matches(competition_id, None)
+            all_events = []
+            for _, match in matches_df.iterrows():
+                all_events.append(fdm.get_events(match['match_id']))
+            if not all_events:
+                return {"error": "No data found for competition."}
+            events = pd.concat(all_events)
+        else:
+            return {"error": "No match or competition specified."}
+        team_events = events[events['team_id'] == team_id]
+        # Define zones
         zones = []
         if zone_type == "vertical":
             zones = ["Defensive Third", "Middle Third", "Attacking Third"]
+            def get_zone(x, y):
+                if x < 40:
+                    return "Defensive Third"
+                elif x < 80:
+                    return "Middle Third"
+                else:
+                    return "Attacking Third"
         elif zone_type == "horizontal":
             zones = ["Left Channel", "Central Channel", "Right Channel"]
+            def get_zone(x, y):
+                if y < 26.6:
+                    return "Left Channel"
+                elif y < 53.3:
+                    return "Central Channel"
+                else:
+                    return "Right Channel"
         elif zone_type == "grid":
-            # 3x3 grid
-            vertical_zones = ["Defensive", "Middle", "Attacking"]
-            horizontal_zones = ["Left", "Central", "Right"]
-            for v in vertical_zones:
-                for h in horizontal_zones:
-                    zones.append(f"{v} {h}")
+            zones = [f"{v} {h}" for v in ["Defensive", "Middle", "Attacking"] for h in ["Left", "Central", "Right"]]
+            def get_zone(x, y):
+                if x < 40:
+                    v = "Defensive"
+                elif x < 80:
+                    v = "Middle"
+                else:
+                    v = "Attacking"
+                if y < 26.6:
+                    h = "Left"
+                elif y < 53.3:
+                    h = "Central"
+                else:
+                    h = "Right"
+                return f"{v} {h}"
         else:
             raise HTTPException(status_code=400, detail=f"Invalid zone_type: {zone_type}")
-        
-        # Generate metrics for each zone
+        # Assign zone to each event
+        team_events = team_events[team_events['location'].apply(lambda loc: isinstance(loc, list) and len(loc) == 2)]
+        team_events = team_events.copy()
+        team_events['zone'] = team_events['location'].apply(lambda loc: get_zone(loc[0], loc[1]))
+        # Aggregate metrics by zone
         zone_metrics = {}
         for zone in zones:
+            zone_df = team_events[team_events['zone'] == zone]
             zone_metrics[zone] = {
-                "possession_pct": 40 + (hash(zone) % 40),  # Random-ish percentage between 40-80%
-                "passes": 100 + (hash(zone) % 200),
-                "pass_success_rate": 70 + (hash(zone) % 20),
-                "shots": 1 + (hash(zone) % 10),
-                "xg": (1 + (hash(zone) % 10)) * 0.1,
-                "ball_recoveries": 5 + (hash(zone) % 15),
-                "defensive_actions": 10 + (hash(zone) % 20)
+                "possession_pct": 100 * len(zone_df[zone_df['type'] == 'Pass']) / max(1, len(team_events[team_events['type'] == 'Pass'])),
+                "passes": len(zone_df[zone_df['type'] == 'Pass']),
+                "pass_success_rate": 100 * len(zone_df[(zone_df['type'] == 'Pass') & (zone_df['pass_outcome'].isna())]) / max(1, len(zone_df[zone_df['type'] == 'Pass'])),
+                "shots": len(zone_df[zone_df['type'] == 'Shot']),
+                "xg": zone_df['shot_statsbomb_xg'].sum() if 'shot_statsbomb_xg' in zone_df else 0,
+                "ball_recoveries": len(zone_df[zone_df['type'] == 'Ball Recovery']),
+                "defensive_actions": len(zone_df[zone_df['type'].isin(['Duel', 'Interception', 'Tackle', 'Block'])])
             }
-        
-        # Generate player involvement by zone
+        # Player involvement by zone
         player_involvement = {}
         for zone in zones:
+            zone_df = team_events[team_events['zone'] == zone]
+            top_players = zone_df['player'].value_counts().head(3)
             players = []
-            for i in range(1, 4):  # Top 3 players per zone
-                player_id = 1000 + (hash(zone) % 100) + i
+            for player, actions in top_players.items():
                 players.append({
-                    "player_id": player_id,
-                    "player_name": f"Player {player_id}",
-                    "position": "Forward" if player_id % 4 == 0 else 
-                              "Midfielder" if player_id % 4 == 1 else 
-                              "Defender" if player_id % 4 == 2 else "Goalkeeper",
-                    "actions": 10 + (hash(f"{zone}_{player_id}") % 50),
-                    "success_rate": 60 + (hash(f"{zone}_{player_id}") % 30)
+                    "player": player,
+                    "actions": actions
                 })
             player_involvement[zone] = players
-        
         return {
             "team_id": team_id,
             "match_id": match_id,
@@ -155,76 +190,42 @@ async def get_player_heat_map(
 ):
     """
     Get player heat map data
-    
     Returns player action locations for generating a heat map
     """
     try:
-        # Generate sample player info
+        if match_id:
+            events = fdm.get_events(match_id)
+        elif competition_id:
+            matches_df = fdm.get_matches(competition_id, None)
+            all_events = []
+            for _, match in matches_df.iterrows():
+                ev = fdm.get_events(match['match_id'])
+                if player_id in ev['player'].unique():
+                    all_events.append(ev)
+            if not all_events:
+                return {"error": "No data found for player."}
+            events = pd.concat(all_events)
+        else:
+            return {"error": "No match or competition specified."}
+        player_events = events[events['player'] == player_id]
+        if event_type:
+            player_events = player_events[player_events['type'] == event_type]
+        actions = []
+        for _, row in player_events.iterrows():
+            if isinstance(row['location'], list) and len(row['location']) == 2:
+                actions.append({
+                    "x": row['location'][0],
+                    "y": row['location'][1],
+                    "type": row['type'],
+                    "minute": row['minute'],
+                    "outcome": row.get('pass_outcome', None) if row['type'] == 'Pass' else None
+                })
         player_info = {
             "player_id": player_id,
-            "player_name": f"Player {player_id}",
-            "team": f"Team {player_id % 10}",
-            "position": "Forward" if player_id % 4 == 0 else 
-                      "Midfielder" if player_id % 4 == 1 else 
-                      "Defender" if player_id % 4 == 2 else "Goalkeeper",
+            "player_name": player_events.iloc[0]["player"] if not player_events.empty else f"Player {player_id}",
+            "team": player_events.iloc[0]["team"] if not player_events.empty else None,
+            "position": player_events.iloc[0].get("position", None) if not player_events.empty else None
         }
-        
-        # Generate sample action locations
-        # Distribution will vary based on position
-        actions = []
-        num_actions = 150  # Sample size
-        
-        # Adjust position bias based on player position
-        if player_info["position"] == "Forward":
-            x_mean, y_mean = 80, 40  # Higher up the pitch
-        elif player_info["position"] == "Midfielder":
-            x_mean, y_mean = 60, 40  # Middle of the pitch
-        elif player_info["position"] == "Defender":
-            x_mean, y_mean = 30, 40  # Lower down the pitch
-        else:  # Goalkeeper
-            x_mean, y_mean = 10, 40  # Own goal area
-        
-        # Generate semi-random action locations with position bias
-        import random
-        random.seed(player_id)  # For reproducibility
-        
-        for i in range(num_actions):
-            # Add some noise to the position
-            x = max(0, min(120, x_mean + random.normalvariate(0, 20)))
-            y = max(0, min(80, y_mean + random.normalvariate(0, 15)))
-            
-            # Determine event type (if not filtered)
-            if event_type:
-                action_type = event_type
-            else:
-                if player_info["position"] == "Forward":
-                    types = ["Pass", "Shot", "Carry", "Ball Receipt"]
-                    weights = [0.5, 0.2, 0.2, 0.1]
-                elif player_info["position"] == "Midfielder":
-                    types = ["Pass", "Shot", "Carry", "Ball Receipt", "Pressure"]
-                    weights = [0.6, 0.05, 0.2, 0.1, 0.05]
-                elif player_info["position"] == "Defender":
-                    types = ["Pass", "Clearance", "Pressure", "Duel", "Carry"]
-                    weights = [0.5, 0.1, 0.2, 0.1, 0.1]
-                else:  # Goalkeeper
-                    types = ["Pass", "Goal Keeper", "Clearance"]
-                    weights = [0.6, 0.3, 0.1]
-                
-                action_type = random.choices(types, weights=weights)[0]
-            
-            # Add the action
-            actions.append({
-                "x": x,
-                "y": y,
-                "type": action_type,
-                "minute": random.randint(1, 90),
-                "outcome": random.choice(["Successful", "Unsuccessful"]) if random.random() < 0.8 else None
-            })
-        
-        # If specific event type was requested, filter actions
-        if event_type:
-            actions = [a for a in actions if a["type"] == event_type]
-        
         return {
             "player": player_info,
             "match_id": match_id,
@@ -348,91 +349,52 @@ def key_metrics_for_role(role: str) -> Dict[str, str]:
     }
     return metrics.get(role, {})
 
-def generate_metrics_for_role(role: str) -> Dict[str, float]:
-    """Generate sample metrics for a player of a given role"""
-    # Base metrics that all roles have
-    metrics = {
-        "goals_per_90": 0.1,
-        "assists_per_90": 0.1,
-        "xg_per_90": 0.15,
-        "xa_per_90": 0.15,
-        "progressive_passes_per_90": 3.0,
-        "successful_dribbles_per_90": 1.0,
-        "defensive_actions_per_90": 5.0,
-        "pressures_per_90": 15.0,
-        "aerial_duels_won_per_90": 1.0,
-        "pass_accuracy": 75.0,
-        "tackles_per_90": 1.5,
-        "interceptions_per_90": 1.2,
-        "crosses_per_90": 1.0,
-        "progressive_carries_per_90": 2.0,
-        "key_passes_per_90": 1.0,
-        "shots_per_90": 1.0,
-        "clearances_per_90": 1.0,
-        "blocks_per_90": 0.5
-    }
-    
-    # Adjust metrics based on role
-    if role == "Target Man":
-        metrics.update({
-            "goals_per_90": 0.5,
-            "aerial_duels_won_per_90": 4.5,
-            "headed_goals_per_90": 0.2
+def generate_metrics_for_role(
+    position: str,
+    competition_id: int,
+    season_id: Optional[int],
+    min_minutes: int,
+    fdm: FootballDataManager
+) -> Dict[str, float]:
+    """
+    Aggregate real per-90 metrics for all players in the given role/position.
+    Returns the average per-90 metrics for the role.
+    """
+    matches_df = fdm.get_matches(competition_id, season_id)
+    all_events = []
+    for _, match in matches_df.iterrows():
+        all_events.append(fdm.get_events(match['match_id']))
+    if not all_events:
+        return {}
+    events = pd.concat(all_events)
+    # Filter to players in position group with min_minutes
+    player_minutes = events.groupby('player')['minute'].sum()
+    eligible_players = player_minutes[player_minutes >= min_minutes].index
+    group_events = events[(events['player'].isin(eligible_players)) & (events['position'] == position)]
+    # Calculate per-90 metrics for each player
+    per90_metrics = []
+    for player_id, pe in group_events.groupby('player'):
+        minutes = pe['minute'].sum()
+        goals = len(pe[(pe['type'] == 'Shot') & (pe['shot_outcome'] == 'Goal')])
+        assists = len(pe[pe['type'] == 'Pass'])  # Placeholder: refine with real assist logic if available
+        xg = pe['shot_statsbomb_xg'].sum() if 'shot_statsbomb_xg' in pe else 0
+        progressive_passes = len(pe[pe['type'] == 'Pass'])  # Placeholder
+        successful_dribbles = len(pe[pe['type'] == 'Carry'])  # Placeholder
+        defensive_actions = len(pe[pe['type'].isin(['Duel', 'Interception', 'Tackle', 'Block'])])
+        pressures = len(pe[pe['type'] == 'Pressure'])
+        per_90 = lambda v: v / (minutes / 90) if minutes > 0 else 0
+        per90_metrics.append({
+            "goals_per_90": per_90(goals),
+            "assists_per_90": per_90(assists),
+            "xg_per_90": per_90(xg),
+            "progressive_passes_per_90": per_90(progressive_passes),
+            "successful_dribbles_per_90": per_90(successful_dribbles),
+            "defensive_actions_per_90": per_90(defensive_actions),
+            "pressures_per_90": per_90(pressures)
         })
-    elif role == "False 9":
-        metrics.update({
-            "goals_per_90": 0.4,
-            "assists_per_90": 0.3,
-            "progressive_passes_per_90": 5.0,
-            "key_passes_per_90": 2.5
-        })
-    elif role == "Inside Forward":
-        metrics.update({
-            "goals_per_90": 0.6,
-            "shots_per_90": 3.5,
-            "xg_per_90": 0.55,
-            "successful_dribbles_per_90": 3.0
-        })
-    elif role == "Winger":
-        metrics.update({
-            "assists_per_90": 0.4,
-            "crosses_per_90": 5.0,
-            "successful_dribbles_per_90": 3.5,
-            "progressive_carries_per_90": 4.5
-        })
-    elif role == "Deep-Lying Playmaker":
-        metrics.update({
-            "progressive_passes_per_90": 8.0,
-            "pass_accuracy": 92.0,
-            "key_passes_per_90": 1.8,
-            "defensive_actions_per_90": 4.0
-        })
-    elif role == "Box-to-Box":
-        metrics.update({
-            "distance_covered_per_90": 12.0,
-            "progressive_carries_per_90": 3.5,
-            "tackles_per_90": 2.5,
-            "shots_per_90": 1.5
-        })
-    elif role == "Attacking Midfielder":
-        metrics.update({
-            "key_passes_per_90": 3.0,
-            "xa_per_90": 0.4,
-            "shots_per_90": 2.5,
-            "successful_dribbles_per_90": 2.5
-        })
-    elif role == "Defensive Midfielder":
-        metrics.update({
-            "interceptions_per_90": 2.5,
-            "tackles_per_90": 3.0,
-            "pressures_per_90": 25.0,
-            "aerial_duels_won_per_90": 2.0
-        })
-    
-    # Add some random variation
-    import random
-    random.seed(hash(role))
-    for key in metrics:
-        metrics[key] *= random.uniform(0.9, 1.1)
-    
-    return metrics
+    if not per90_metrics:
+        return {}
+    # Compute average per-90 metrics for the role
+    df = pd.DataFrame(per90_metrics)
+    avg_metrics = df.mean().to_dict()
+    return avg_metrics

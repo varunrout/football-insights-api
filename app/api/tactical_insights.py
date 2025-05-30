@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Query, Depends
 from typing import List, Dict, Any, Optional
 import logging
+import pandas as pd
 from app.util.football_data_manager import FootballDataManager
 from app.services.metrics_engine import MetricsEngine
 from app.services.tactical_analyzer import TacticalAnalyzer
