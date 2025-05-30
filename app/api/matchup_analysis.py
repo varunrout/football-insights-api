@@ -26,9 +26,11 @@ async def get_head_to_head(
     Returns historical matchup data and performance metrics
     """
     try:
-        matches_df = fdm.get_matches(competition_id, season_id) if competition_id and season_id else None
-        if matches_df is None:
-            return {"error": "No competition/season specified."}
+        if not competition_id or not season_id:
+            return {"error": "competition_id and season_id are required."}
+        matches_df = fdm.get_matches_for_team(competition_id, season_id, team1_id)
+        if matches_df is None or matches_df.empty:
+            return {"error": "No matches found for team1 in this competition/season."}
         # Find matches where both teams played
         h2h_matches = matches_df[((matches_df['home_team_id'] == team1_id) & (matches_df['away_team_id'] == team2_id)) |
                                  ((matches_df['home_team_id'] == team2_id) & (matches_df['away_team_id'] == team1_id))]
@@ -118,12 +120,14 @@ async def get_team_style_comparison(
     Returns team playing style metrics compared to other teams or league average
     """
     try:
-        matches_df = fdm.get_matches(competition_id, season_id)
-        all_events = []
-        for _, match in matches_df.iterrows():
-            all_events.append(fdm.get_events(match['match_id']))
+        if not competition_id or not season_id:
+            return {"error": "competition_id and season_id are required."}
+        matches_df = fdm.get_matches_for_team(competition_id, season_id, team_id)
+        if matches_df is None or matches_df.empty:
+            return {"error": "No matches found for team in this competition/season."}
+        all_events = [fdm.get_events(match['match_id']) for _, match in matches_df.iterrows()]
         if not all_events:
-            return {"error": "No data found for competition/season."}
+            return {"error": "No data found for competition/season/team."}
         events = pd.concat(all_events)
         # Filter to team and league
         team_events = events[events['team_id'] == team_id]
@@ -182,6 +186,7 @@ async def get_matchup_prediction(
     team1_id: int = Query(..., description="First team ID"),
     team2_id: int = Query(..., description="Second team ID"),
     competition_id: Optional[int] = Query(None, description="Competition ID"),
+    season_id: Optional[int] = Query(None, description="Season ID"),
     fdm: FootballDataManager = Depends(get_data_manager)
 ):
     """
@@ -189,14 +194,14 @@ async def get_matchup_prediction(
     Returns probability distributions for match outcomes and key metrics
     """
     try:
-        if not competition_id:
-            return {"error": "Competition ID required."}
-        matches_df = fdm.get_matches(competition_id, None)
-        all_events = []
-        for _, match in matches_df.iterrows():
-            all_events.append(fdm.get_events(match['match_id']))
+        if not competition_id or not season_id:
+            return {"error": "competition_id and season_id are required."}
+        matches_df = fdm.get_matches_for_team(competition_id, season_id, team1_id)
+        if matches_df is None or matches_df.empty:
+            return {"error": "No matches found for team1 in this competition/season."}
+        all_events = [fdm.get_events(match['match_id']) for _, match in matches_df.iterrows()]
         if not all_events:
-            return {"error": "No data found for competition."}
+            return {"error": "No data found for competition/season/team."}
         events = pd.concat(all_events)
         # Get team names from matches_df
         def get_team_name(team_id):
@@ -300,13 +305,14 @@ async def get_league_benchmarks(
     Returns team metrics compared to league benchmarks (min, max, avg, percentiles)
     """
     try:
-        # Get matches and events
-        matches_df = fdm.get_matches(competition_id, season_id)
-        all_events = []
-        for _, match in matches_df.iterrows():
-            all_events.append(fdm.get_events(match['match_id']))
+        if not competition_id or not season_id:
+            return {"error": "competition_id and season_id are required."}
+        matches_df = fdm.get_matches_for_team(competition_id, season_id, team_id)
+        if matches_df is None or matches_df.empty:
+            return {"error": "No matches found for team in this competition/season."}
+        all_events = [fdm.get_events(match['match_id']) for _, match in matches_df.iterrows()]
         if not all_events:
-            return {"error": "No data found for competition/season."}
+            return {"error": "No data found for competition/season/team."}
         events = pd.concat(all_events)
         # Get team name
         team_row = matches_df[(matches_df['home_team_id'] == team_id) | (matches_df['away_team_id'] == team_id)]

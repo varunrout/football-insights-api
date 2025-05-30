@@ -22,9 +22,9 @@ async def get_dashboard_summary(
     Get summary KPIs for dashboard (real data)
     """
     try:
-        # Load all matches for the team/competition/season
+        # Load all events for the team/competition/season
         events = fdm.get_events_for_team(
-            team_id=team_id, competition_id=competition_id, season_id=season_id
+            competition_id=competition_id, season_id=season_id, team_id=team_id
         )
         if events is None or len(events) == 0:
             return {"metrics": {}, "competition_id": competition_id, "team_id": team_id, "season_id": season_id}
@@ -59,16 +59,16 @@ async def get_xg_timeline(
     Get xG vs Goals timeline for dashboard (real data)
     """
     try:
-        matches = fdm.get_matches_for_team(team_id, competition_id, season_id)
+        matches = fdm.get_matches_for_team(competition_id=competition_id, season_id=season_id, team_id=team_id)
         timeline = []
         cumulative_xg = []
         cumulative_goals = []
         total_xg = 0
         total_goals = 0
-        for match in matches:
+        for _, match in matches.iterrows():
             events = fdm.get_events(match["match_id"])
             metrics = calculate_basic_match_metrics(events)
-            team_name = match["team_name"] if "team_name" in match else team_id
+            team_name = team_id
             team_metrics = metrics.get(team_name, {})
             xg = team_metrics.get("xg", 0)
             goals = team_metrics.get("goals", 0)
@@ -104,10 +104,14 @@ async def get_shot_map(
         if match_id:
             events = fdm.get_events(match_id)
         else:
-            events = fdm.get_events_for_team(team_id=team_id, competition_id=competition_id)
+            events = fdm.get_events_for_team(competition_id=competition_id, season_id=None, team_id=team_id)
         if events is None or len(events) == 0:
             return {"shots": []}
-        shots = events[(events["team"] == team_id) & (events["type"] == "Shot")]
+        # Try both 'team_id' and 'team' columns for compatibility
+        if 'team_id' in events:
+            shots = events[(events["team_id"] == team_id) & (events["type"] == "Shot")]
+        else:
+            shots = events[(events["team"] == team_id) & (events["type"] == "Shot")]
         shot_list = []
         for _, shot in shots.iterrows():
             shot_list.append({

@@ -7,7 +7,7 @@ from typing import Dict, List
 from app.config.environment import settings
 
 # Import API routers
-from app.api import dashboard, player_analysis, player_comparison, positional_analysis, xt_analytics, tactical_insights, matchup_analysis
+from app.api import dashboard, player_analysis, player_comparison, positional_analysis, xt_analytics, tactical_insights, matchup_analysis, core_selectors
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -58,6 +58,7 @@ app.include_router(positional_analysis.router, prefix="/api/v1/positional-analys
 app.include_router(xt_analytics.router, prefix="/api/v1/xt-analytics", tags=["xT Analytics"])
 app.include_router(tactical_insights.router, prefix="/api/v1/tactical-insights", tags=["Tactical Insights"])
 app.include_router(matchup_analysis.router, prefix="/api/v1/matchup-analysis", tags=["Matchup Analysis"])
+app.include_router(core_selectors.router, prefix="/api/v1/core-selectors", tags=["Core Selectors"])
 
 # Event handlers
 @app.on_event("startup")

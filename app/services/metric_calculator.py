@@ -9,13 +9,20 @@ from app.util.metrics.ppda import calculate_ppda as ppda_calculator  # Import th
 
 
 def load_xt_model(model_path=None):
-    """Load the trained xT model from disk."""
+    """Load the trained xT model from disk, or generate a default if missing."""
     if model_path is None:
         model_path = Path('data_cache/metrics/xt_model.pkl')
-    
+
     if not model_path.exists():
-        raise FileNotFoundError(f"xT model not found at {model_path}. Run the metric engineering notebook first.")
-    
+        # Auto-generate a default xT model and save it
+        model_path.parent.mkdir(parents=True, exist_ok=True)
+        xt_model = ExpectedThreatModel()
+        xt_model.initialize()  # Default theoretical grid
+        xt_model.save(str(model_path))
+        import logging
+        logging.getLogger(__name__).warning(f"xT model not found, generated default and saved to {model_path}.")
+        return xt_model
+
     with open(model_path, 'rb') as f:
         return pickle.load(f)
 

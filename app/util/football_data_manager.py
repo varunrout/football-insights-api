@@ -454,3 +454,27 @@ class FootballDataManager:
         print(f"Loaded analysis dataset from {dataset_path}")
         print(f"Summary: {analysis_data['summary']}")
         return analysis_data
+    
+    def get_matches_for_team(self, competition_id: int, season_id: int, team_id: int) -> pd.DataFrame:
+        """
+        Get all matches for a given team in a competition and season.
+        Returns a DataFrame of matches where the team is home or away.
+        """
+        matches = self.get_matches(competition_id, season_id)
+        return matches[(matches['home_team_id'] == team_id) | (matches['away_team_id'] == team_id)]
+
+    def get_events_for_team(self, competition_id: int, season_id: int, team_id: int) -> pd.DataFrame:
+        """
+        Get all events for a given team in a competition and season.
+        Returns a DataFrame of events for all matches where the team participated.
+        """
+        matches = self.get_matches_for_team(competition_id, season_id, team_id)
+        all_events = []
+        for _, match in matches.iterrows():
+            events = self.get_events(match['match_id'])
+            team_events = events[events['team_id'] == team_id] if 'team_id' in events else events[events['team'] == team_id]
+            all_events.append(team_events)
+        if all_events:
+            return pd.concat(all_events)
+        else:
+            return pd.DataFrame()
