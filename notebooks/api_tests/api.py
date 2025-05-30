@@ -28,15 +28,15 @@ if __name__ == "__main__":
     # --- New selector endpoints ---
     print("Testing selector endpoints (new logic):")
     get("core-selectors/competitions")
-    get("core-selectors/seasons", params={"competition_id": 1})
-    get("core-selectors/teams", params={"competition_id": 1, "season_id": 2020})
-    get("core-selectors/matches", params={"competition_id": 1, "season_id": 2020, "team_id": 42})
-    get("core-selectors/players", params={"competition_id": 1, "season_id": 2020, "team_id": 42})
+    get("core-selectors/seasons", params={"competition_id": 9})
+    get("core-selectors/teams", params={"competition_id": 9, "season_id": 281, "home_team": "Bayer Leverkusen"})
+    get("core-selectors/matches", params={"competition_id": 9, "season_id": 281})
+    get("core-selectors/players", params={"competition_id": 9, "season_id": 281, "team_id": 42})
 
     # --- New xT analytics endpoints ---
     print("Testing xT analytics endpoints (new logic):")
     get("xt-analytics/model")
-    get("xt-analytics/player-rankings", params={"competition_id": 1, "season_id": 2020, "team_id": 42})
+    get("xt-analytics/player-rankings", params={"competition_id": 9, "season_id": 281, "team_id": 42})
     get("xt-analytics/pass-map", params={"match_id": 1001})
     get("xt-analytics/team-contribution", params={"competition_id": 1, "season_id": 2020, "team_id": 42})
 
