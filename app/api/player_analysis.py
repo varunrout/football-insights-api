@@ -17,6 +17,7 @@ async def get_player_profile(
     player_id: int = Query(..., description="Player ID"),
     competition_id: Optional[int] = Query(None, description="Filter by competition ID"),
     season_id: Optional[int] = Query(None, description="Filter by season ID"),
+    team_id: Optional[int] = Query(None, description="Filter by team ID (optional, for faster lookup)"),
     fdm: FootballDataManager = Depends(get_data_manager)
 ):
     """
@@ -25,20 +26,28 @@ async def get_player_profile(
     Returns player info, key metrics, and performance summary
     """
     try:
-        # Gather all matches for the player in the competition/season
-        matches = []
-        if competition_id and season_id:
+        # Validate selectors
+        if not competition_id or not season_id:
+            return {"error": "competition_id and season_id are required."}
+        # Use team_id if provided for faster lookup
+        if team_id:
+            events = fdm.get_events_for_team(competition_id, season_id, team_id)
+            if events is None or events.empty:
+                return {"error": "No data found for team in this competition/season."}
+            player_events = events[events['player'] == player_id]
+        else:
+            # Fallback: aggregate all events for the competition/season
             matches_df = fdm.get_matches(competition_id, season_id)
+            all_events = []
             for _, match in matches_df.iterrows():
-                events = fdm.get_events(match['match_id'])
-                if player_id in events['player'].unique():
-                    matches.append((match, events))
-        if not matches:
-            return {"error": "No data found for player."}
-        
-        # Aggregate player info and metrics
-        all_events = pd.concat([ev for _, ev in matches])
-        player_events = all_events[all_events['player'] == player_id]
+                ev = fdm.get_events(match['match_id'])
+                if player_id in ev['player'].unique():
+                    all_events.append(ev)
+            if not all_events:
+                return {"error": "No data found for player."}
+            player_events = pd.concat(all_events)
+        if player_events.empty:
+            return {"error": "No data found for player in this context."}
         
         # Basic info (fallbacks if not available)
         first_event = player_events.iloc[0]
@@ -108,6 +117,8 @@ async def get_player_performance_trend(
     metric: str = Query(..., description="Metric to track over time"),
     timeframe: str = Query("season", description="Timeframe: 'season', 'last10', 'last5'"),
     competition_id: Optional[int] = Query(None, description="Filter by competition ID"),
+    season_id: Optional[int] = Query(None, description="Filter by season ID"),
+    team_id: Optional[int] = Query(None, description="Filter by team ID (optional, for faster lookup)"),
     fdm: FootballDataManager = Depends(get_data_manager)
 ):
     """
@@ -115,15 +126,22 @@ async def get_player_performance_trend(
     Returns time series data for a specific metric
     """
     try:
-        matches = []
-        if competition_id:
-            # Assume only one season for simplicity
-            matches_df = fdm.get_matches(competition_id, None)
+        if not competition_id or not season_id:
+            return {"error": "competition_id and season_id are required."}
+        if team_id:
+            events = fdm.get_events_for_team(competition_id, season_id, team_id)
+            if events is None or events.empty:
+                return {"error": "No data found for team in this competition/season."}
+            player_events = events[events['player'] == player_id]
+            matches = player_events['match_id'].unique()
+        else:
+            matches_df = fdm.get_matches(competition_id, season_id)
+            matches = []
             for _, match in matches_df.iterrows():
-                events = fdm.get_events(match['match_id'])
-                if player_id in events['player'].unique():
-                    matches.append((match, events))
-        if not matches:
+                ev = fdm.get_events(match['match_id'])
+                if player_id in ev['player'].unique():
+                    matches.append((match, ev))
+        if not matches or (isinstance(matches, list) and not matches):
             return {"error": "No data found for player."}
         # Determine number of matches for timeframe
         if timeframe == "season":
@@ -191,6 +209,8 @@ async def get_player_event_map(
     event_type: str = Query("all", description="Event type: 'all', 'passes', 'shots', 'defensive'"),
     match_id: Optional[int] = Query(None, description="Filter by match ID"),
     competition_id: Optional[int] = Query(None, description="Filter by competition ID"),
+    season_id: Optional[int] = Query(None, description="Filter by season ID"),
+    team_id: Optional[int] = Query(None, description="Filter by team ID (optional, for faster lookup)"),
     fdm: FootballDataManager = Depends(get_data_manager)
 ):
     """
@@ -200,8 +220,10 @@ async def get_player_event_map(
     try:
         if match_id:
             events = fdm.get_events(match_id)
-        elif competition_id:
-            matches_df = fdm.get_matches(competition_id, None)
+        elif competition_id and season_id and team_id:
+            events = fdm.get_events_for_team(competition_id, season_id, team_id)
+        elif competition_id and season_id:
+            matches_df = fdm.get_matches(competition_id, season_id)
             all_events = []
             for _, match in matches_df.iterrows():
                 ev = fdm.get_events(match['match_id'])
@@ -211,7 +233,7 @@ async def get_player_event_map(
                 return {"error": "No data found for player."}
             events = pd.concat(all_events)
         else:
-            return {"error": "No match or competition specified."}
+            return {"error": "Insufficient selector parameters. Provide match_id or (competition_id, season_id[, team_id])."}
         player_events = events[events['player'] == player_id]
         # Filter by event type
         if event_type == "passes":
@@ -252,6 +274,7 @@ async def get_player_percentile_ranks(
     competition_id: Optional[int] = Query(None, description="Filter by competition ID"),
     season_id: Optional[int] = Query(None, description="Filter by season ID"),
     min_minutes: int = Query(450, description="Minimum minutes played for comparison group"),
+    team_id: Optional[int] = Query(None, description="Filter by team ID (optional, for faster lookup)"),
     fdm: FootballDataManager = Depends(get_data_manager)
 ):
     """
@@ -259,15 +282,18 @@ async def get_player_percentile_ranks(
     Returns percentile ranks for various metrics
     """
     try:
-        # Gather all matches for the competition/season
-        matches_df = fdm.get_matches(competition_id, season_id) if competition_id and season_id else None
-        all_events = []
-        if matches_df is not None:
-            for _, match in matches_df.iterrows():
-                all_events.append(fdm.get_events(match['match_id']))
-        if not all_events:
-            return {"error": "No data found for competition/season."}
-        events = pd.concat(all_events)
+        if not competition_id or not season_id:
+            return {"error": "competition_id and season_id are required."}
+        if team_id:
+            events = fdm.get_events_for_team(competition_id, season_id, team_id)
+        else:
+            matches_df = fdm.get_matches(competition_id, season_id)
+            all_events = [fdm.get_events(match['match_id']) for _, match in matches_df.iterrows()]
+            if not all_events:
+                return {"error": "No data found for competition/season."}
+            events = pd.concat(all_events)
+        if events is None or events.empty:
+            return {"error": "No data found for competition/season/team."}
         # Determine position group if not specified
         if not position_group:
             player_row = events[events['player'] == player_id].iloc[0]

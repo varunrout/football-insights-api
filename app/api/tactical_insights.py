@@ -31,18 +31,19 @@ async def get_defensive_metrics(
 ):
     """
     Get defensive metrics for a team
-
     Returns PPDA, defensive actions, and pressure metrics
     """
     try:
-        # Get defensive metrics using the tactical analyzer
+        if not team_id:
+            return {"error": "team_id is required."}
+        if not match_id and (not competition_id or not season_id):
+            return {"error": "competition_id and season_id are required if match_id is not provided."}
         metrics = analyzer.get_defensive_metrics(
             team_id=team_id,
             match_id=match_id,
             competition_id=competition_id,
             season_id=season_id
         )
-
         return metrics
     except Exception as e:
         logger.error(f"Error getting defensive metrics: {str(e)}")
@@ -58,18 +59,19 @@ async def get_offensive_metrics(
 ):
     """
     Get offensive metrics for a team
-
     Returns possession metrics, attacking patterns, and shot creation
     """
     try:
-        # Get offensive metrics using the tactical analyzer
+        if not team_id:
+            return {"error": "team_id is required."}
+        if not match_id and (not competition_id or not season_id):
+            return {"error": "competition_id and season_id are required if match_id is not provided."}
         metrics = analyzer.get_offensive_metrics(
             team_id=team_id,
             match_id=match_id,
             competition_id=competition_id,
             season_id=season_id
         )
-
         return metrics
     except Exception as e:
         logger.error(f"Error getting offensive metrics: {str(e)}")

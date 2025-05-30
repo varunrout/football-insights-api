@@ -18,6 +18,7 @@ async def get_role_analysis(
     competition_id: int = Query(..., description="Competition ID"),
     season_id: Optional[int] = Query(None, description="Season ID"),
     min_minutes: int = Query(450, description="Minimum minutes played"),
+    team_id: Optional[int] = Query(None, description="Team ID (optional, for faster lookup)"),
     fdm: FootballDataManager = Depends(get_data_manager)
 ):
     """
@@ -25,13 +26,18 @@ async def get_role_analysis(
     Returns metrics and player clusters for the specified position
     """
     try:
-        matches_df = fdm.get_matches(competition_id, season_id)
-        all_events = []
-        for _, match in matches_df.iterrows():
-            all_events.append(fdm.get_events(match['match_id']))
-        if not all_events:
-            return {"error": "No data found for competition/season."}
-        events = pd.concat(all_events)
+        if not competition_id or not season_id:
+            return {"error": "competition_id and season_id are required."}
+        if team_id:
+            events = fdm.get_events_for_team(competition_id, season_id, team_id)
+        else:
+            matches_df = fdm.get_matches(competition_id, season_id)
+            all_events = [fdm.get_events(match['match_id']) for _, match in matches_df.iterrows()]
+            if not all_events:
+                return {"error": "No data found for competition/season."}
+            events = pd.concat(all_events)
+        if events is None or events.empty:
+            return {"error": "No data found for competition/season/team."}
         # Filter to players in position group with min_minutes
         player_minutes = events.groupby('player')['minute'].sum()
         eligible_players = player_minutes[player_minutes >= min_minutes].index
@@ -79,6 +85,7 @@ async def get_zone_analysis(
     team_id: int = Query(..., description="Team ID"),
     match_id: Optional[int] = Query(None, description="Match ID (if None, returns data for all matches)"),
     competition_id: Optional[int] = Query(None, description="Competition ID"),
+    season_id: Optional[int] = Query(None, description="Season ID"),
     zone_type: str = Query("vertical", description="Zone type: 'vertical', 'horizontal', or 'grid'"),
     fdm: FootballDataManager = Depends(get_data_manager)
 ):
@@ -89,16 +96,18 @@ async def get_zone_analysis(
     try:
         if match_id:
             events = fdm.get_events(match_id)
+        elif competition_id and season_id:
+            events = fdm.get_events_for_team(competition_id, season_id, team_id)
         elif competition_id:
             matches_df = fdm.get_matches(competition_id, None)
-            all_events = []
-            for _, match in matches_df.iterrows():
-                all_events.append(fdm.get_events(match['match_id']))
+            all_events = [fdm.get_events(match['match_id']) for _, match in matches_df.iterrows()]
             if not all_events:
                 return {"error": "No data found for competition."}
             events = pd.concat(all_events)
         else:
             return {"error": "No match or competition specified."}
+        if events is None or events.empty:
+            return {"error": "No data found for team in this context."}
         team_events = events[events['team_id'] == team_id]
         # Define zones
         zones = []
@@ -185,7 +194,9 @@ async def get_player_heat_map(
     player_id: int = Query(..., description="Player ID"),
     match_id: Optional[int] = Query(None, description="Match ID (if None, returns data for all matches)"),
     competition_id: Optional[int] = Query(None, description="Competition ID"),
+    season_id: Optional[int] = Query(None, description="Season ID"),
     event_type: Optional[str] = Query(None, description="Filter by event type (e.g., 'Pass', 'Shot')"),
+    team_id: Optional[int] = Query(None, description="Team ID (optional, for faster lookup)"),
     fdm: FootballDataManager = Depends(get_data_manager)
 ):
     """
@@ -195,6 +206,18 @@ async def get_player_heat_map(
     try:
         if match_id:
             events = fdm.get_events(match_id)
+        elif competition_id and season_id and team_id:
+            events = fdm.get_events_for_team(competition_id, season_id, team_id)
+        elif competition_id and season_id:
+            matches_df = fdm.get_matches(competition_id, season_id)
+            all_events = []
+            for _, match in matches_df.iterrows():
+                ev = fdm.get_events(match['match_id'])
+                if player_id in ev['player'].unique():
+                    all_events.append(ev)
+            if not all_events:
+                return {"error": "No data found for player."}
+            events = pd.concat(all_events)
         elif competition_id:
             matches_df = fdm.get_matches(competition_id, None)
             all_events = []
@@ -207,6 +230,8 @@ async def get_player_heat_map(
             events = pd.concat(all_events)
         else:
             return {"error": "No match or competition specified."}
+        if events is None or events.empty:
+            return {"error": "No data found for player in this context."}
         player_events = events[events['player'] == player_id]
         if event_type:
             player_events = player_events[player_events['type'] == event_type]

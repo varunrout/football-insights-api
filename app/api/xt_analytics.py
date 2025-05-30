@@ -47,14 +47,14 @@ async def get_player_xt_rankings(
     Returns players sorted by their xT contribution
     """
     try:
-        # Gather all matches for the competition/season/team
-        matches = fdm.get_matches(competition_id, season_id)
-        all_events = []
-        for _, match in matches.iterrows():
-            if team_id is not None and match['home_team_id'] != team_id and match['away_team_id'] != team_id:
-                continue
-            events = fdm.get_events(match['match_id'])
-            all_events.append(events)
+        if not competition_id or not season_id:
+            return {"error": "competition_id and season_id are required."}
+        if team_id:
+            matches = fdm.get_matches_for_team(competition_id, season_id, team_id)
+            all_events = [fdm.get_events(match['match_id']) for _, match in matches.iterrows()]
+        else:
+            matches = fdm.get_matches(competition_id, season_id)
+            all_events = [fdm.get_events(match['match_id']) for _, match in matches.iterrows()]
         if not all_events:
             return {"players": []}
         events_df = pd.concat(all_events)
@@ -94,6 +94,8 @@ async def get_xt_pass_map(
     """
     try:
         events = fdm.get_events(match_id)
+        if events is None or events.empty:
+            return {"passes": []}
         xt_model = load_xt_model()
         events_with_xt = calculate_xt_added(events, xt_model)
         passes = events_with_xt[(events_with_xt['type'] == 'Pass') & (events_with_xt['xt_added'] >= min_xt)]
@@ -120,6 +122,7 @@ async def get_team_xt_contribution(
     competition_id: int = Query(..., description="Competition ID"),
     team_id: int = Query(..., description="Team ID"),
     match_id: Optional[int] = Query(None, description="Match ID (if None, returns data for all matches)"),
+    season_id: Optional[int] = Query(None, description="Season ID"),
     fdm: FootballDataManager = Depends(get_data_manager)
 ):
     """
@@ -132,15 +135,11 @@ async def get_team_xt_contribution(
         if match_id:
             events = fdm.get_events(match_id)
         else:
-            # Aggregate all matches for the team in the competition
-            matches = fdm.get_matches(competition_id, None)
-            all_events = []
-            for _, match in matches.iterrows():
-                if match['home_team_id'] == team_id or match['away_team_id'] == team_id:
-                    all_events.append(fdm.get_events(match['match_id']))
-            if not all_events:
-                return {}
-            events = pd.concat(all_events)
+            if not competition_id or not season_id:
+                return {"error": "competition_id and season_id are required if match_id is not provided."}
+            events = fdm.get_events_for_team(competition_id, season_id, team_id)
+        if events is None or events.empty:
+            return {}
         # Filter for team
         team_events = events[events['team'] == team_id]
         xt_events = calculate_xt_added(team_events, xt_model)
@@ -185,6 +184,7 @@ async def get_zone_effectiveness(
     competition_id: int = Query(..., description="Competition ID"),
     team_id: Optional[int] = Query(None, description="Team ID (if None, returns league average)"),
     match_id: Optional[int] = Query(None, description="Match ID (if None, returns data for all matches)"),
+    season_id: Optional[int] = Query(None, description="Season ID"),
     fdm: FootballDataManager = Depends(get_data_manager)
 ):
     """
@@ -197,16 +197,18 @@ async def get_zone_effectiveness(
         if match_id:
             events = fdm.get_events(match_id)
         else:
-            matches = fdm.get_matches(competition_id, None)
-            all_events = []
-            for _, match in matches.iterrows():
-                if team_id is None or match['home_team_id'] == team_id or match['away_team_id'] == team_id:
-                    all_events.append(fdm.get_events(match['match_id']))
-            if not all_events:
-                return {}
-            events = pd.concat(all_events)
-        if team_id is not None:
-            events = events[events['team'] == team_id]
+            if not competition_id or not season_id:
+                return {"error": "competition_id and season_id are required if match_id is not provided."}
+            if team_id:
+                events = fdm.get_events_for_team(competition_id, season_id, team_id)
+            else:
+                matches = fdm.get_matches(competition_id, season_id)
+                all_events = [fdm.get_events(match['match_id']) for _, match in matches.iterrows()]
+                if not all_events:
+                    return {}
+                events = pd.concat(all_events)
+        if events is None or events.empty:
+            return {}
         xt_events = calculate_xt_added(events, xt_model)
         # Define 4x6 grid
         grid_x, grid_y = 6, 4
