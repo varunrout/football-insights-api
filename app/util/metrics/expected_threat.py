@@ -187,11 +187,11 @@ class ExpectedThreatModel:
                 start_location = (event['location'][0], event['location'][1])
 
         # Extract end location based on event type
-        if event.get('type') == 'Pass':
+        if event.get('type_name') == 'Pass':
             if 'pass_end_location' in event and event['pass_end_location'] is not None:
                 if isinstance(event['pass_end_location'], (list, tuple)) and len(event['pass_end_location']) >= 2:
                     end_location = (event['pass_end_location'][0], event['pass_end_location'][1])
-        elif event.get('type') == 'Carry':
+        elif event.get('type_name') == 'Carry':
             if 'carry_end_location' in event and event['carry_end_location'] is not None:
                 if isinstance(event['carry_end_location'], (list, tuple)) and len(event['carry_end_location']) >= 2:
                     end_location = (event['carry_end_location'][0], event['carry_end_location'][1])
@@ -234,7 +234,7 @@ class ExpectedThreatModel:
         df['xt_end'] = 0.0
 
         # Calculate xT for all events with location and end_location
-        valid_events = df[df['type'].isin(['Pass', 'Carry'])]
+        valid_events = df[df['type_name'].isin(['Pass', 'Carry'])]
 
         for idx, event in valid_events.iterrows():
             # Get start location
@@ -245,10 +245,10 @@ class ExpectedThreatModel:
 
             # Get end location
             end_location = None
-            if event['type'] == 'Pass' and 'pass_end_location' in event and event['pass_end_location'] is not None:
+            if event['type_name'] == 'Pass' and 'pass_end_location' in event and event['pass_end_location'] is not None:
                 if isinstance(event['pass_end_location'], (list, tuple)) and len(event['pass_end_location']) >= 2:
                     end_location = (event['pass_end_location'][0], event['pass_end_location'][1])
-            elif event['type'] == 'Carry' and 'carry_end_location' in event and event['carry_end_location'] is not None:
+            elif event['type_name'] == 'Carry' and 'carry_end_location' in event and event['carry_end_location'] is not None:
                 if isinstance(event['carry_end_location'], (list, tuple)) and len(event['carry_end_location']) >= 2:
                     end_location = (event['carry_end_location'][0], event['carry_end_location'][1])
 
@@ -306,14 +306,14 @@ class ExpectedThreatModel:
         xt_df = self.calculate_xt_for_match(events_df)
 
         # Filter for the player
-        player_events = xt_df[xt_df['player'] == player_id]
+        player_events = xt_df[xt_df['player_id'] == player_id]
 
         # Sum xT contributions
         total_xt = player_events['xt_value'].sum()
 
         # Get counts by action type
-        pass_xt = player_events[player_events['type'] == 'Pass']['xt_value'].sum()
-        carry_xt = player_events[player_events['type'] == 'Carry']['xt_value'].sum()
+        pass_xt = player_events[player_events['type_name'] == 'Pass']['xt_value'].sum()
+        carry_xt = player_events[player_events['type_name'] == 'Carry']['xt_value'].sum()
 
         # Get top 5 contributions
         top_actions = player_events.sort_values('xt_value', ascending=False).head(5)
@@ -321,12 +321,12 @@ class ExpectedThreatModel:
 
         for _, action in top_actions.iterrows():
             top_actions_list.append({
-                "type": action['type'],
+                "type": action['type_name'],
                 "minute": action['minute'],
                 "second": action['second'],
                 "xt_value": action['xt_value'],
                 "start_location": action['location'],
-                "end_location": action['pass_end_location'] if action['type'] == 'Pass' else action['carry_end_location']
+                "end_location": action['pass_end_location'] if action['type_name'] == 'Pass' else action['carry_end_location']
             })
 
         return {
