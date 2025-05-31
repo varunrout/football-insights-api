@@ -49,8 +49,8 @@ if __name__ == "__main__":
     # --- New player analysis endpoints ---
     print("Testing player analysis endpoints (new logic):")
     get("player-analysis/profile", params={"player_id": 40724, "competition_id": 9, "season_id": 281})
-    get("player-analysis/performance-trend", params={"player_id": 32712, "metric": "goals", "timeframe": "last5", "competition_id": 1, "season_id": 2020})
-    get("player-analysis/event-map", params={"player_id": 32712, "event_type": "shots", "competition_id": 1, "season_id": 2020})
+    get("player-analysis/performance-trend", params={"player_id": 32712, "metric": "goals", "timeframe": "last5", "competition_id": 9, "season_id": 281})
+    get("player-analysis/event-map", params={"player_id": 32712, "event_type": "shots", "competition_id": 9, "season_id": 281})
 
     # --- New player comparison endpoints ---
     print("Testing player comparison endpoints (new logic):")
