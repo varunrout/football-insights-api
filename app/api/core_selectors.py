@@ -100,7 +100,24 @@ async def list_players(
             events = pd.concat(all_events) if all_events else None
         if events is None or events.empty:
             return []
-        players = events[['player', 'player_id']].drop_duplicates().to_dict(orient="records")
+        # Try to extract players from tactics_lineup_json if available
+        if 'tactics_lineup_json' in events.columns and events['tactics_lineup_json'].notnull().any():
+            import json
+            lineups = events['tactics_lineup_json'].dropna().unique()
+            players = []
+            for lineup_json in lineups:
+                lineup = json.loads(lineup_json)
+                for entry in lineup:
+                    player = entry.get('player', {})
+                    position = entry.get('position', {})
+                    players.append({
+                        'player_id': player.get('id'),
+                        'player_name': player.get('name'),
+                        'position_id': position.get('id'),
+                        'position_name': position.get('name'),
+                        'jersey_number': entry.get('jersey_number')
+                    })
+            return players
         return players
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error listing players: {str(e)}")
