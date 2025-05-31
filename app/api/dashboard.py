@@ -109,7 +109,7 @@ async def get_shot_map(
             return {"shots": []}
         # Try both 'team_id' and 'team' columns for compatibility
         if 'team_id' in events:
-            shots = events[(events["team_id"] == team_id) & (events["type"] == "Shot")]
+            shots = events[(events["team_id"] == team_id) & (events["type_name"] == "Shot")]
         else:
             shots = events[(events["team"] == team_id) & (events["type"] == "Shot")]
         shot_list = []
@@ -120,7 +120,7 @@ async def get_shot_map(
                 "xg": shot.get("shot_statsbomb_xg", 0),
                 "outcome": shot.get("shot_outcome", "Unknown"),
                 "minute": shot.get("minute", None),
-                "player": shot.get("player", None)
+                "player_id": shot.get("player_id", None)
             })
         return {"shots": shot_list}
     except Exception as e:

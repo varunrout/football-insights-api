@@ -138,35 +138,35 @@ def identify_progressive_passes(events_df, distance_threshold=10):
 def calculate_basic_match_metrics(events_df):
     """
     Calculate basic match metrics for each team from an events DataFrame.
-    Returns a dict of metrics per team.
+    Returns a dict of metrics per team_id.
     """
-    teams = events_df['team'].unique()
+    teams = events_df['team_id'].unique()
     metrics = {}
     for team in teams:
-        team_events = events_df[events_df['team'] == team]
-        opposition_events = events_df[events_df['team'] != team]
+        team_events = events_df[events_df['team_id'] == team]
+        opposition_events = events_df[events_df['team_id'] != team]
 
         # Possession
-        team_possessions = len(events_df[events_df['possession_team'] == team]['possession'].unique())
+        team_possessions = len(events_df[events_df['possession_team_id'] == team]['possession'].unique())
         total_possessions = len(events_df['possession'].unique())
         possession_pct = team_possessions / total_possessions * 100 if total_possessions > 0 else 0
 
         # Passing
-        passes = team_events[team_events['type'] == 'Pass']
+        passes = team_events[team_events['type_name'] == 'Pass']
         passes_attempted = len(passes)
         passes_completed = len(passes[passes['pass_outcome'].isna()]) if 'pass_outcome' in passes else 0
         pass_completion = passes_completed / passes_attempted * 100 if passes_attempted > 0 else 0
 
         # Shooting
-        shots = team_events[team_events['type'] == 'Shot']
+        shots = team_events[team_events['type_name'] == 'Shot']
         goals = len(shots[shots['shot_outcome'] == 'Goal']) if 'shot_outcome' in shots else 0
         shots_on_target = len(shots[shots['shot_outcome'].isin(['On Target', 'Goal'])]) if 'shot_outcome' in shots else 0
         xg = shots['shot_statsbomb_xg'].sum() if 'shot_statsbomb_xg' in shots else 0
 
         # Defensive
-        pressures = len(team_events[team_events['type'] == 'Pressure'])
-        tackles = len(team_events[team_events['type'] == 'Tackle'])
-        interceptions = len(team_events[team_events['type'] == 'Interception'])
+        pressures = len(team_events[team_events['type_name'] == 'Pressure'])
+        tackles = len(team_events[team_events['type_name'] == 'Tackle'])
+        interceptions = len(team_events[team_events['type_name'] == 'Interception'])
 
         # PPDA (Passes allowed Per Defensive Action)
         try:
