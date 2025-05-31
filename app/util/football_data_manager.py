@@ -38,7 +38,7 @@ class FootballDataManager:
         Flatten the raw competitions JSON into a DataFrame with all relevant fields.
         """
         records = []
-        for c in competitions_json:
+        for key, c in competitions_json.items():
             record = {
                 'competition_id': c.get('competition_id'),
                 'season_id': c.get('season_id'),
@@ -60,7 +60,7 @@ class FootballDataManager:
         Flatten the raw matches JSON into a DataFrame with all relevant fields.
         """
         records = []
-        for m in matches_json:
+        for key, m in matches_json.items():
             record = {
                 'match_id': m.get('match_id'),
                 'match_date': m.get('match_date'),
@@ -116,7 +116,7 @@ class FootballDataManager:
         Flatten the raw events JSON into a DataFrame with all relevant fields, including tactics and lineup.
         """
         records = []
-        for e in events_json:
+        for key, e in events_json.items():
             record = {
                 'id': e.get('id'),
                 'index': e.get('index'),
