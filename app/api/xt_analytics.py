@@ -94,14 +94,14 @@ async def get_xt_pass_map(
             return {"passes": []}
         xt_model = load_xt_model()
         events_with_xt = calculate_xt_added(events, xt_model)
-        passes = events_with_xt[(events_with_xt['type'] == 'Pass') & (events_with_xt['xt_added'] >= min_xt)]
+        passes = events_with_xt[(events_with_xt['type_name'] == 'Pass') & (events_with_xt['xt_added'] >= min_xt)]
         if team_id is not None:
-            passes = passes[passes['team'] == team_id]
+            passes = passes[passes['team_name'] == team_id]
         pass_list = []
         for _, row in passes.iterrows():
             pass_list.append({
-                "player": row.get("player"),
-                "team": row.get("team"),
+                "player_id": row.get("player_id"),
+                "team_name": row.get("team_name"),
                 "start_x": row["location"][0] if isinstance(row["location"], list) else None,
                 "start_y": row["location"][1] if isinstance(row["location"], list) else None,
                 "end_x": row["pass_end_location"][0] if isinstance(row["pass_end_location"], list) else None,

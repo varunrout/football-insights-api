@@ -38,7 +38,7 @@ if __name__ == "__main__":
     get("xt-analytics/model")
     get("xt-analytics/player-rankings", params={"competition_id": 9, "season_id": 281, "team_id": 904})
     get("xt-analytics/pass-map", params={"match_id": 3895302})
-    get("xt-analytics/team-contribution", params={"competition_id": 1, "season_id": 2020, "team_id": 904})
+    get("xt-analytics/team-contribution", params={"competition_id": 9, "season_id": 281, "team_id": 904})
 
     # --- New dashboard endpoints ---
     print("Testing dashboard endpoints (new logic):")
