@@ -57,7 +57,7 @@ async def list_teams(
         team_info = []
         for tid in teams:
             row = matches[(matches['home_team_id'] == tid) | (matches['away_team_id'] == tid)].iloc[0]
-            name = row['home_team'] if row['home_team_id'] == tid else row['away_team']
+            name = row['home_team_name'] if row['home_team_id'] == tid else row['away_team_name']
             team_info.append({"team_id": tid, "team_name": name})
         return team_info
     except Exception as e:

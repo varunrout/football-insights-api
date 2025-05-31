@@ -29,9 +29,9 @@ if __name__ == "__main__":
     print("Testing selector endpoints (new logic):")
     get("core-selectors/competitions")
     get("core-selectors/seasons", params={"competition_id": 9})
-    get("core-selectors/teams", params={"competition_id": 9, "season_id": 281, "home_team": "Bayer Leverkusen"})
+    get("core-selectors/teams", params={"competition_id": 9, "season_id": 281, "team_id": 904})
     get("core-selectors/matches", params={"competition_id": 9, "season_id": 281})
-    get("core-selectors/players", params={"competition_id": 9, "season_id": 281, "team_id": 42})
+    get("core-selectors/players", params={"competition_id": 9, "season_id": 281, "team_id": 904})
 
     # --- New xT analytics endpoints ---
     print("Testing xT analytics endpoints (new logic):")
