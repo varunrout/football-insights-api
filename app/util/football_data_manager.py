@@ -33,74 +33,173 @@ class FootballDataManager:
         self.events_cache = {}   # {match_id: events_df}
         self.frames_cache = {}   # {match_id: freeze_frame_df}
         
+    def _flatten_competitions_json(self, competitions_json: list) -> pd.DataFrame:
+        """
+        Flatten the raw competitions JSON into a DataFrame with all relevant fields.
+        """
+        records = []
+        for c in competitions_json:
+            record = {
+                'competition_id': c.get('competition_id'),
+                'season_id': c.get('season_id'),
+                'competition_name': c.get('competition_name'),
+                'competition_gender': c.get('competition_gender'),
+                'country_name': c.get('country_name'),
+                'competition_youth': c.get('competition_youth'),
+                'competition_international': c.get('competition_international'),
+                'season_name': c.get('season_name'),
+                'match_available_360': c.get('match_available_360'),
+                'match_available': c.get('match_available'),
+                # Add more fields as needed
+            }
+            records.append(record)
+        return pd.DataFrame(records)
+
+    def _flatten_matches_json(self, matches_json: list) -> pd.DataFrame:
+        """
+        Flatten the raw matches JSON into a DataFrame with all relevant fields.
+        """
+        records = []
+        for m in matches_json:
+            record = {
+                'match_id': m.get('match_id'),
+                'match_date': m.get('match_date'),
+                'kick_off': m.get('kick_off'),
+                'competition_id': m.get('competition', {}).get('competition_id') if isinstance(m.get('competition'), dict) else m.get('competition_id'),
+                'competition_name': m.get('competition', {}).get('competition_name') if isinstance(m.get('competition'), dict) else m.get('competition_name'),
+                'country_name': m.get('competition', {}).get('country_name') if isinstance(m.get('competition'), dict) else m.get('country_name'),
+                'season_id': m.get('season', {}).get('season_id') if isinstance(m.get('season'), dict) else m.get('season_id'),
+                'season_name': m.get('season', {}).get('season_name') if isinstance(m.get('season'), dict) else m.get('season_name'),
+                'home_team_id': m.get('home_team', {}).get('home_team_id') if isinstance(m.get('home_team'), dict) else m.get('home_team_id'),
+                'home_team_name': m.get('home_team', {}).get('home_team_name') if isinstance(m.get('home_team'), dict) else m.get('home_team'),
+                'home_team_gender': m.get('home_team', {}).get('home_team_gender') if isinstance(m.get('home_team'), dict) else None,
+                'home_team_group': m.get('home_team', {}).get('home_team_group') if isinstance(m.get('home_team'), dict) else None,
+                'home_team_country_id': m.get('home_team', {}).get('country', {}).get('id') if isinstance(m.get('home_team', {}).get('country'), dict) else None,
+                'home_team_country_name': m.get('home_team', {}).get('country', {}).get('name') if isinstance(m.get('home_team', {}).get('country'), dict) else None,
+                'home_manager_id': m.get('home_team', {}).get('managers', [{}])[0].get('id') if m.get('home_team', {}).get('managers') else None,
+                'home_manager_name': m.get('home_team', {}).get('managers', [{}])[0].get('name') if m.get('home_team', {}).get('managers') else None,
+                'away_team_id': m.get('away_team', {}).get('away_team_id') if isinstance(m.get('away_team'), dict) else m.get('away_team_id'),
+                'away_team_name': m.get('away_team', {}).get('away_team_name') if isinstance(m.get('away_team'), dict) else m.get('away_team'),
+                'away_team_gender': m.get('away_team', {}).get('away_team_gender') if isinstance(m.get('away_team'), dict) else None,
+                'away_team_group': m.get('away_team', {}).get('away_team_group') if isinstance(m.get('away_team'), dict) else None,
+                'away_team_country_id': m.get('away_team', {}).get('country', {}).get('id') if isinstance(m.get('away_team', {}).get('country'), dict) else None,
+                'away_team_country_name': m.get('away_team', {}).get('country', {}).get('name') if isinstance(m.get('away_team', {}).get('country'), dict) else None,
+                'away_manager_id': m.get('away_team', {}).get('managers', [{}])[0].get('id') if m.get('away_team', {}).get('managers') else None,
+                'away_manager_name': m.get('away_team', {}).get('managers', [{}])[0].get('name') if m.get('away_team', {}).get('managers') else None,
+                'home_score': m.get('home_score'),
+                'away_score': m.get('away_score'),
+                'match_status': m.get('match_status'),
+                'match_status_360': m.get('match_status_360'),
+                'last_updated': m.get('last_updated'),
+                'last_updated_360': m.get('last_updated_360'),
+                'data_version': m.get('metadata', {}).get('data_version') if isinstance(m.get('metadata'), dict) else None,
+                'shot_fidelity_version': m.get('metadata', {}).get('shot_fidelity_version') if isinstance(m.get('metadata'), dict) else None,
+                'xy_fidelity_version': m.get('metadata', {}).get('xy_fidelity_version') if isinstance(m.get('metadata'), dict) else None,
+                'match_week': m.get('match_week'),
+                'competition_stage_id': m.get('competition_stage', {}).get('id') if isinstance(m.get('competition_stage'), dict) else None,
+                'competition_stage_name': m.get('competition_stage', {}).get('name') if isinstance(m.get('competition_stage'), dict) else None,
+                'stadium_id': m.get('stadium', {}).get('id') if isinstance(m.get('stadium'), dict) else None,
+                'stadium_name': m.get('stadium', {}).get('name') if isinstance(m.get('stadium'), dict) else None,
+                'stadium_country_id': m.get('stadium', {}).get('country', {}).get('id') if isinstance(m.get('stadium', {}).get('country'), dict) else None,
+                'stadium_country_name': m.get('stadium', {}).get('country', {}).get('name') if isinstance(m.get('stadium', {}).get('country'), dict) else None,
+                'referee_id': m.get('referee', {}).get('id') if isinstance(m.get('referee'), dict) else None,
+                'referee_name': m.get('referee', {}).get('name') if isinstance(m.get('referee'), dict) else None,
+                'referee_country_id': m.get('referee', {}).get('country', {}).get('id') if isinstance(m.get('referee', {}).get('country'), dict) else None,
+                'referee_country_name': m.get('referee', {}).get('country', {}).get('name') if isinstance(m.get('referee', {}).get('country'), dict) else None,
+                # Add more fields as needed
+            }
+            records.append(record)
+        return pd.DataFrame(records)
+
+    def _flatten_events_json(self, events_json: list) -> pd.DataFrame:
+        """
+        Flatten the raw events JSON into a DataFrame with all relevant fields, including tactics and lineup.
+        """
+        records = []
+        for e in events_json:
+            record = {
+                'id': e.get('id'),
+                'index': e.get('index'),
+                'period': e.get('period'),
+                'timestamp': e.get('timestamp'),
+                'minute': e.get('minute'),
+                'second': e.get('second'),
+                'type_id': e.get('type', {}).get('id') if isinstance(e.get('type'), dict) else None,
+                'type_name': e.get('type', {}).get('name') if isinstance(e.get('type'), dict) else e.get('type'),
+                'possession': e.get('possession'),
+                'possession_team_id': e.get('possession_team', {}).get('id') if isinstance(e.get('possession_team'), dict) else None,
+                'possession_team_name': e.get('possession_team', {}).get('name') if isinstance(e.get('possession_team'), dict) else e.get('possession_team'),
+                'play_pattern_id': e.get('play_pattern', {}).get('id') if isinstance(e.get('play_pattern'), dict) else None,
+                'play_pattern_name': e.get('play_pattern', {}).get('name') if isinstance(e.get('play_pattern'), dict) else e.get('play_pattern'),
+                'team_id': e.get('team', {}).get('id') if isinstance(e.get('team'), dict) else None,
+                'team_name': e.get('team', {}).get('name') if isinstance(e.get('team'), dict) else e.get('team'),
+                'player_id': e.get('player', {}).get('id') if isinstance(e.get('player'), dict) else None,
+                'player_name': e.get('player', {}).get('name') if isinstance(e.get('player'), dict) else e.get('player'),
+                'location': e.get('location'),
+                'duration': e.get('duration'),
+                'match_id': e.get('match_id'),
+                # Tactics fields
+                'tactics_formation': e.get('tactics', {}).get('formation') if isinstance(e.get('tactics'), dict) else None,
+                'tactics_lineup': e.get('tactics', {}).get('lineup') if isinstance(e.get('tactics'), dict) else None,
+                # Add more fields as needed, including nested ones
+            }
+            # Optionally flatten more nested fields (e.g., pass, shot, etc.)
+            if 'pass' in e:
+                record['pass_end_location'] = e['pass'].get('end_location')
+                record['pass_outcome'] = e['pass'].get('outcome', {}).get('name') if isinstance(e['pass'].get('outcome'), dict) else e['pass'].get('outcome')
+            if 'shot' in e:
+                record['shot_end_location'] = e['shot'].get('end_location')
+                record['shot_outcome'] = e['shot'].get('outcome', {}).get('name') if isinstance(e['shot'].get('outcome'), dict) else e['shot'].get('outcome')
+                record['shot_statsbomb_xg'] = e['shot'].get('statsbomb_xg')
+            # Optionally flatten lineup (store as JSON string for DataFrame compatibility)
+            if 'tactics' in e and isinstance(e['tactics'], dict) and 'lineup' in e['tactics']:
+                import json as _json
+                record['tactics_lineup_json'] = _json.dumps(e['tactics']['lineup'])
+            records.append(record)
+        df = pd.DataFrame(records)
+        if 'id' in df.columns:
+            df.set_index('id', inplace=True)
+        return df
+
     def get_competitions(self, force_refresh: bool = False, 
                          only_with_360: bool = True, 
                          exclude_women: bool = True) -> pd.DataFrame:
         """
         Get available competitions, with optional filtering.
-        
-        Args:
-            force_refresh: If True, fetches from API even if cached
-            only_with_360: Filter to competitions with 360 data available
-            exclude_women: Filter out women's competitions
-            
-        Returns:
-            DataFrame of competitions
         """
         if self.competitions_cache is None or force_refresh:
-            competitions = sb.competitions()
-            
+            competitions_json = sb.competitions(fmt='json')
+            competitions = self._flatten_competitions_json(competitions_json)
             # Apply filters if specified
             if only_with_360:
                 competitions = competitions[competitions['match_available_360'].notna()]
             if exclude_women:
                 competitions = competitions[competitions['competition_gender'] != 'women']
-                
             self.competitions_cache = competitions
-            
-        # Ensure competitions_cache is always a DataFrame
         if not isinstance(self.competitions_cache, pd.DataFrame):
             self.competitions_cache = pd.DataFrame(self.competitions_cache)
         return self.competitions_cache
-    
+
     def get_matches(self, competition_id: int, season_id: int, 
                    force_refresh: bool = False) -> pd.DataFrame:
         """
         Get matches for a specific competition and season.
-        
-        Args:
-            competition_id: The competition ID
-            season_id: The season ID
-            force_refresh: If True, fetches from API even if cached
-            
-        Returns:
-            DataFrame of matches
         """
         cache_key = f"{competition_id}_{season_id}"
-        
         if cache_key not in self.matches_cache or force_refresh:
-            matches = sb.matches(competition_id=competition_id, season_id=season_id)
+            matches_json = sb.matches(competition_id=competition_id, season_id=season_id, fmt='json')
+            matches = self._flatten_matches_json(matches_json)
             self.matches_cache[cache_key] = matches
-            
         return self.matches_cache[cache_key]
-    
+
     def get_events(self, match_id: int, force_refresh: bool = False) -> pd.DataFrame:
         """
         Get events data for a specific match.
-        
-        Args:
-            match_id: The match ID
-            force_refresh: If True, fetches from API even if cached
-            
-        Returns:
-            DataFrame of events
         """
         if match_id not in self.events_cache or force_refresh:
-            events = sb.events(match_id=match_id)
-            # Process events to standardized format
-            events_df = self._process_events(events)
+            events_json = sb.events(match_id=match_id, fmt='json')
+            events_df = self._flatten_events_json(events_json)
             self.events_cache[match_id] = events_df
-            
         return self.events_cache[match_id]
     
     def get_freeze_frames(self, match_id: int, force_refresh: bool = False) -> pd.DataFrame:
