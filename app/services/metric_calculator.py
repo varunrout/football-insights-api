@@ -24,7 +24,19 @@ def load_xt_model(model_path=None):
         return xt_model
 
     with open(model_path, 'rb') as f:
-        return pickle.load(f)
+        data = pickle.load(f)
+        # If the loaded object is a dict (old format), convert to ExpectedThreatModel
+        if isinstance(data, dict):
+            xt_model = ExpectedThreatModel(grid_size=data.get('grid_size', (12, 8)))
+            xt_model.pitch_length = data.get('pitch_length', 120)
+            xt_model.pitch_width = data.get('pitch_width', 80)
+            xt_model.cell_length = xt_model.pitch_length / xt_model.grid_size[0]
+            xt_model.cell_width = xt_model.pitch_width / xt_model.grid_size[1]
+            xt_model.xt_grid = data['xt_grid']
+            # Overwrite with new format for future loads
+            xt_model.save(str(model_path))
+            return xt_model
+        return data
 
 
 def calculate_xt_added(events_df, xt_model=None):
