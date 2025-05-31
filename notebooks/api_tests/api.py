@@ -36,15 +36,15 @@ if __name__ == "__main__":
     # --- New xT analytics endpoints ---
     print("Testing xT analytics endpoints (new logic):")
     get("xt-analytics/model")
-    get("xt-analytics/player-rankings", params={"competition_id": 9, "season_id": 281, "team_id": 42})
-    get("xt-analytics/pass-map", params={"match_id": 1001})
-    get("xt-analytics/team-contribution", params={"competition_id": 1, "season_id": 2020, "team_id": 42})
+    get("xt-analytics/player-rankings", params={"competition_id": 9, "season_id": 281, "team_id": 904})
+    get("xt-analytics/pass-map", params={"match_id": 3895302})
+    get("xt-analytics/team-contribution", params={"competition_id": 1, "season_id": 2020, "team_id": 904})
 
     # --- New dashboard endpoints ---
     print("Testing dashboard endpoints (new logic):")
-    get("dashboard/summary", params={"competition_id": 1, "season_id": 2020, "team_id": 42})
-    get("dashboard/xg-timeline", params={"competition_id": 1, "season_id": 2020, "team_id": 42})
-    get("dashboard/shot-map", params={"competition_id": 1, "season_id": 2020, "team_id": 42})
+    get("dashboard/summary", params={"competition_id": 1, "season_id": 2020, "team_id": 904})
+    get("dashboard/xg-timeline", params={"competition_id": 1, "season_id": 2020, "team_id": 904})
+    get("dashboard/shot-map", params={"competition_id": 1, "season_id": 2020, "team_id": 904})
 
     # --- New player analysis endpoints ---
     print("Testing player analysis endpoints (new logic):")

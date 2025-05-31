@@ -23,10 +23,15 @@ async def get_xt_model():
     """
     try:
         xt_model = load_xt_model()
-        grid = xt_model.grid
+        grid = xt_model.get('xt_grid')
+        # If xt_model is a dict, use keys instead of attributes
+        n_grid_cells_x = xt_model.get('grid_size', (None, None))[0]
+        n_grid_cells_y = xt_model.get('grid_size', (None, None))[1]
+        pitch_length = xt_model.get('pitch_length', 120)
+        pitch_width = xt_model.get('pitch_width', 80)
         return {
-            "grid_size": {"x": xt_model.n_grid_cells_x, "y": xt_model.n_grid_cells_y},
-            "pitch_dimensions": {"x": 120, "y": 80},
+            "grid_size": {"x": n_grid_cells_x, "y": n_grid_cells_y},
+            "pitch_dimensions": {"x": pitch_length, "y": pitch_width},
             "grid_values": grid.tolist()
         }
     except Exception as e:
