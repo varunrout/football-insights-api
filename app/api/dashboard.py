@@ -95,6 +95,7 @@ async def get_shot_map(
     competition_id: int = Query(..., description="Competition ID"),
     team_id: int = Query(..., description="Team ID"),
     match_id: Optional[int] = Query(None, description="Match ID (if None, returns data for all matches)"),
+    season_id: Optional[int] = Query(None, description="Season ID (required if match_id is not provided)"),
     fdm: FootballDataManager = Depends(get_data_manager)
 ):
     """
@@ -102,9 +103,13 @@ async def get_shot_map(
     """
     try:
         if match_id:
+            if match_id is None:
+                return {"shots": []}
             events = fdm.get_events(match_id)
         else:
-            events = fdm.get_events_for_team(competition_id=competition_id, season_id=None, team_id=team_id)
+            if season_id is None:
+                return {"error": "season_id is required if match_id is not provided."}
+            events = fdm.get_events_for_team(competition_id=competition_id, season_id=season_id, team_id=team_id)
         if events is None or len(events) == 0:
             return {"shots": []}
         # Try both 'team_id' and 'team' columns for compatibility
