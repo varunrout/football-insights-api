@@ -137,7 +137,7 @@ async def get_team_xt_contribution(
         if events is None or events.empty:
             return {}
         # Filter for team
-        team_events = events[events['team'] == team_id]
+        team_events = events[events['team_id'] == team_id]
         xt_events = calculate_xt_added(team_events, xt_model)
         # By zone (vertical thirds)
         def get_zone(x):
@@ -151,10 +151,10 @@ async def get_team_xt_contribution(
         xt_events['zone'] = xt_events['location'].apply(lambda loc: get_zone(loc[0]) if isinstance(loc, list) else None)
         by_zone = xt_events.groupby('zone')['xt_added'].sum().to_dict()
         # By player
-        by_player = xt_events.groupby('player')['xt_added'].sum().reset_index().rename(columns={'xt_added': 'xt'})
+        by_player = xt_events.groupby('player_id')['xt_added'].sum().reset_index().rename(columns={'xt_added': 'xt'})
         by_player = by_player.sort_values('xt', ascending=False).to_dict(orient='records')
         # By action type
-        by_action_type = xt_events.groupby('type')['xt_added'].sum().to_dict()
+        by_action_type = xt_events.groupby('type_name')['xt_added'].sum().to_dict()
         # By time period (15-min bins)
         xt_events['period'] = xt_events['minute'].apply(lambda m: (m // 15) * 15)
         by_time_period = xt_events.groupby('period')['xt_added'].sum().reset_index()
