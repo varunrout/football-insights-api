@@ -194,7 +194,7 @@ def calculate_basic_match_metrics(events_df):
 def get_player_xt_contributions(events_df, xt_model=None):
     """
     Aggregate xT contributions for each player from an events DataFrame.
-    Returns a DataFrame with player, team, total_xt_added, positive_actions, avg_xt_per_action.
+    Returns a DataFrame with player_id, team_name, total_xt_added, positive_actions, avg_xt_per_action.
     """
     import pandas as pd
     from collections import defaultdict
@@ -205,18 +205,18 @@ def get_player_xt_contributions(events_df, xt_model=None):
     player_xt_count = defaultdict(int)
     player_teams = {}
     for _, event in events_with_xt.iterrows():
-        if pd.notna(event.get('player')) and event.get('xt_added', 0) > 0:
-            player = event['player']
+        if pd.notna(event.get('player_id')) and event.get('xt_added', 0) > 0:
+            player = event['player_id']
             player_xt_contributions[player] += event['xt_added']
             player_xt_count[player] += 1
-            player_teams[player] = event.get('team', 'Unknown')
+            player_teams[player] = event.get('team_name', 'Unknown')
     player_xt_data = []
     for player, xt_sum in player_xt_contributions.items():
         count = player_xt_count[player]
         team = player_teams.get(player, 'Unknown')
         player_xt_data.append({
-            'player': player,
-            'team': team,
+            'player_id': player,
+            'team_name': team,
             'total_xt_added': xt_sum,
             'positive_actions': count,
             'avg_xt_per_action': xt_sum / count if count > 0 else 0

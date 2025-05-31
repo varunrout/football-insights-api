@@ -63,8 +63,8 @@ async def get_player_xt_rankings(
         player_xt_df = player_xt_df.sort_values("total_xt_added", ascending=False)
         players = [
             {
-                "player": row["player"],
-                "team": row["team"],
+                "player_id": row["player_id"],
+                "team_name": row["team_name"],
                 "total_xt": row["total_xt_added"],
                 "xt_per_action": row["avg_xt_per_action"],
                 "positive_actions": row["positive_actions"]
