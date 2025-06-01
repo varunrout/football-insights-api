@@ -3,6 +3,7 @@ from typing import List, Dict, Any, Optional
 import logging
 from app.util.football_data_manager import FootballDataManager
 from app.services.metric_calculator import calculate_basic_match_metrics
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -22,12 +23,19 @@ async def get_dashboard_summary(
     Get summary KPIs for dashboard (real data)
     """
     try:
-        # Load all events for the team/competition/season
-        events = fdm.get_events_for_team(
-            competition_id=competition_id, season_id=season_id, team_id=team_id
-        )
-        if events is None or len(events) == 0:
+        # Load all matches for the team/competition/season
+        matches = fdm.get_matches_for_team(competition_id=competition_id, season_id=season_id, team_id=team_id)
+        if matches is None or matches.empty:
             return {"metrics": {}, "competition_id": competition_id, "team_id": team_id, "season_id": season_id}
+        # For each match, load all events (not just for the team)
+        all_events = []
+        for _, match in matches.iterrows():
+            match_events = fdm.get_events(match["match_id"])
+            if match_events is not None:
+                all_events.append(match_events)
+        if not all_events:
+            return {"metrics": {}, "competition_id": competition_id, "team_id": team_id, "season_id": season_id}
+        events = pd.concat(all_events)
         metrics = calculate_basic_match_metrics(events)
         # Use the first team in the metrics dict if team_id is None
         team_key = team_id if team_id in metrics else (list(metrics.keys())[0] if metrics else None)
