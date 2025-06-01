@@ -218,7 +218,7 @@ async def get_matchup_prediction(
         def team_stats(tid):
             te = events[events['team_id'] == tid]
             matches = te['match_id'].nunique()
-            possession = 100 * len(te[te['possession_team'] == tid]) / max(1, len(te))
+            possession = 100 * len(te[te['possession_team_id'] == tid]) / max(1, len(te))
             shots = len(te[te['type_name'] == 'Shot']) / max(1, matches)
             xg = te['shot_statsbomb_xg'].sum() / max(1, matches) if 'shot_statsbomb_xg' in te else 0
             return possession, shots, xg
