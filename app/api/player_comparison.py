@@ -74,8 +74,8 @@ async def get_player_radar_comparison(
             }
             player_data.append({
                 "player_id": player_id,
-                "player_name": pe.iloc[0]["player"] if not pe.empty else f"Player {player_id}",
-                "team": pe.iloc[0]["team"] if not pe.empty else None,
+                "player_name": pe.iloc[0]["player_name"] if not pe.empty and "player_name" in pe.columns else f"Player {player_id}",
+                "team": pe.iloc[0]["team_name"] if not pe.empty and "team_name" in pe.columns else None,
                 "metrics": {k: player_metrics[k] for k in metrics}
             })
         # Normalization
@@ -146,8 +146,8 @@ async def get_player_bar_comparison(
             per_90_value = value / (minutes / 90) if per_90 and minutes > 0 else value
             player_data.append({
                 "player_id": player_id,
-                "player_name": pe.iloc[0]["player"] if not pe.empty else f"Player {player_id}",
-                "team": pe.iloc[0]["team"] if not pe.empty else None,
+                "player_name": pe.iloc[0]["player_name"] if not pe.empty and "player_name" in pe.columns else f"Player {player_id}",
+                "team": pe.iloc[0]["team_name"] if not pe.empty and "team_name" in pe.columns else None,
                 "value": value,
                 "per_90_value": per_90_value,
                 "minutes": minutes
@@ -216,8 +216,8 @@ async def get_player_scatter_comparison(
             is_highlighted = highlighted_player_ids and player_id in highlighted_player_ids
             players.append({
                 "player_id": player_id,
-                "player_name": pe.iloc[0]["player"] if not pe.empty else f"Player {player_id}",
-                "team": pe.iloc[0]["team"] if not pe.empty else None,
+                "player_name": pe.iloc[0]["player_name"] if not pe.empty and "player_name" in pe.columns else f"Player {player_id}",
+                "team": pe.iloc[0]["team_name"] if not pe.empty and "team_name" in pe.columns else None,
                 "position_group": pe.iloc[0].get('position', None),
                 "x_value": x_value,
                 "y_value": y_value,
@@ -312,8 +312,8 @@ async def get_player_similarity_map(
             pe = events[events['player_id'] == pid]
             similar_players.append({
                 "player_id": pid,
-                "player_name": pe.iloc[0]["player"] if not pe.empty else f"Player {pid}",
-                "team": pe.iloc[0]["team"] if not pe.empty else None,
+                "player_name": pe.iloc[0]["player_name"] if not pe.empty and "player_name" in pe.columns else f"Player {pid}",
+                "team": pe.iloc[0]["team_name"] if not pe.empty and "team_name" in pe.columns else None,
                 "position": pe.iloc[0].get('position', None),
                 "minutes": pe['minute'].sum(),
                 "similarity_score": sim,
@@ -322,8 +322,8 @@ async def get_player_similarity_map(
         pe_ref = events[events['player_id'] == player_id]
         reference_player = {
             "player_id": player_id,
-            "player_name": pe_ref.iloc[0]["player"] if not pe_ref.empty else f"Player {player_id}",
-            "team": pe_ref.iloc[0]["team"] if not pe_ref.empty else None,
+            "player_name": pe_ref.iloc[0]["player_name"] if not pe_ref.empty and "player_name" in pe_ref.columns else f"Player {player_id}",
+            "team": pe_ref.iloc[0]["team_name"] if not pe_ref.empty and "team_name" in pe_ref.columns else None,
             "position": pe_ref.iloc[0].get('position', None),
             "minutes": pe_ref['minute'].sum(),
             "key_metrics": {m: float(ref_vector[i]) for i, m in enumerate(metrics)}
