@@ -29,7 +29,7 @@ def calculate_ppda(events_df: pd.DataFrame,
         return {"home": {"ppda": 0.0}, "away": {"ppda": 0.0}}
 
     # Get unique teams
-    teams = events_df['team'].dropna().unique()
+    teams = events_df['team_name'].dropna().unique()
     if len(teams) < 2:
         return {"home": {"ppda": 0.0}, "away": {"ppda": 0.0}}
 
@@ -62,8 +62,8 @@ def _calculate_team_ppda(events_df: pd.DataFrame,
         Dictionary with PPDA values and components
     """
     # Filter for opposition passes
-    opposition_passes = events_df[(events_df['team'] == opposition) &
-                                 (events_df['type'] == 'Pass')]
+    opposition_passes = events_df[(events_df['team_name'] == opposition) &
+                                 (events_df['type_name'] == 'Pass')]
 
     # If considering only opposition thirds, filter passes by location
     if opposition_thirds and 'location' in opposition_passes.columns:
@@ -80,8 +80,8 @@ def _calculate_team_ppda(events_df: pd.DataFrame,
 
     # Filter for team defensive actions
     defensive_actions = events_df[
-        (events_df['team'] == team) &
-        (events_df['type'].isin(['Interception', 'Tackle', 'Foul Committed', 'Challenge']))
+        (events_df['team_name'] == team) &
+        (events_df['type_name'].isin(['Interception', 'Tackle', 'Foul Committed', 'Challenge']))
     ]
 
     # If considering only opposition thirds, filter defensive actions by location
@@ -102,10 +102,10 @@ def _calculate_team_ppda(events_df: pd.DataFrame,
         "ppda": ppda,
         "opposition_passes": pass_count,
         "defensive_actions": action_count,
-        "interceptions": len(defensive_actions[defensive_actions['type'] == 'Interception']),
-        "tackles": len(defensive_actions[defensive_actions['type'] == 'Tackle']),
-        "challenges": len(defensive_actions[defensive_actions['type'] == 'Challenge']),
-        "fouls": len(defensive_actions[defensive_actions['type'] == 'Foul Committed'])
+        "interceptions": len(defensive_actions[defensive_actions['type_name'] == 'Interception']),
+        "tackles": len(defensive_actions[defensive_actions['type_name'] == 'Tackle']),
+        "challenges": len(defensive_actions[defensive_actions['type_name'] == 'Challenge']),
+        "fouls": len(defensive_actions[defensive_actions['type_name'] == 'Foul Committed'])
     }
 
 def calculate_ppda_timeline(events_df: pd.DataFrame,
@@ -125,7 +125,7 @@ def calculate_ppda_timeline(events_df: pd.DataFrame,
         return {"home": [], "away": []}
 
     # Get unique teams
-    teams = events_df['team'].dropna().unique()
+    teams = events_df['team_name'].dropna().unique()
     if len(teams) < 2:
         return {"home": [], "away": []}
 
@@ -189,7 +189,7 @@ def calculate_team_ppda_comparison(team_events: List[pd.DataFrame]) -> Dict[str,
 
     for match_idx, events_df in enumerate(team_events):
         # Get teams in this match
-        teams = events_df['team'].dropna().unique()
+        teams = events_df['team_name'].dropna().unique()
         if len(teams) < 2:
             continue
 
@@ -197,7 +197,7 @@ def calculate_team_ppda_comparison(team_events: List[pd.DataFrame]) -> Dict[str,
         match_ppda = calculate_ppda(events_df)
 
         # Determine if team is home or away based on first event
-        team_events_only = events_df[events_df['team'] == teams[0]]
+        team_events_only = events_df[events_df['team_name'] == teams[0]]
         is_home = len(team_events_only) > 0
 
         # Get the relevant PPDA value
