@@ -49,7 +49,7 @@ async def get_player_radar_comparison(
             return {"error": "No data found for competition/season/team."}
         player_data = []
         for player_id in player_ids:
-            pe = events[events['player'] == player_id]
+            pe = events[events['player_id'] == player_id]
             minutes = pe['minute'].sum()
             # Calculate metrics
             goals = len(pe[(pe['type'] == 'Shot') & (pe['shot_outcome'] == 'Goal')])
@@ -130,7 +130,7 @@ async def get_player_bar_comparison(
             return {"error": "No data found for competition/season/team."}
         player_data = []
         for player_id in player_ids:
-            pe = events[events['player'] == player_id]
+            pe = events[events['player_id'] == player_id]
             minutes = pe['minute'].sum()
             # Calculate metric value
             if metric == "goals":
@@ -193,7 +193,7 @@ async def get_player_scatter_comparison(
             return {"error": "No data found for competition/season/team."}
         # Group by player
         players = []
-        for player_id, pe in events.groupby('player'):
+        for player_id, pe in events.groupby('player_id'):
             minutes = pe['minute'].sum()
             if minutes < min_minutes:
                 continue
@@ -272,7 +272,7 @@ async def get_player_similarity_map(
             "successful_dribbles_per_90", "defensive_actions_per_90", "pressures_per_90"
         ]
         player_vectors = {}
-        for pid, pe in events.groupby('player'):
+        for pid, pe in events.groupby('player_id'):
             minutes = pe['minute'].sum()
             if minutes < min_minutes:
                 continue
@@ -309,7 +309,7 @@ async def get_player_similarity_map(
         similarities.sort(key=lambda x: -x[1])
         similar_players = []
         for pid, sim in similarities[:limit]:
-            pe = events[events['player'] == pid]
+            pe = events[events['player_id'] == pid]
             similar_players.append({
                 "player_id": pid,
                 "player_name": pe.iloc[0]["player"] if not pe.empty else f"Player {pid}",
@@ -319,7 +319,7 @@ async def get_player_similarity_map(
                 "similarity_score": sim,
                 "key_metrics": {m: float(player_vectors[pid][i]) for i, m in enumerate(metrics)}
             })
-        pe_ref = events[events['player'] == player_id]
+        pe_ref = events[events['player_id'] == player_id]
         reference_player = {
             "player_id": player_id,
             "player_name": pe_ref.iloc[0]["player"] if not pe_ref.empty else f"Player {player_id}",

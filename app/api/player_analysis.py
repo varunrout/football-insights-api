@@ -34,14 +34,14 @@ async def get_player_profile(
             events = fdm.get_events_for_team(competition_id, season_id, team_id)
             if events is None or events.empty:
                 return {"error": "No data found for team in this competition/season."}
-            player_events = events[events['player'] == player_id]
+            player_events = events[events['player_id'] == player_id]
         else:
             # Fallback: aggregate all events for the competition/season
             matches_df = fdm.get_matches(competition_id, season_id)
             all_events = []
             for _, match in matches_df.iterrows():
                 ev = fdm.get_events(match['match_id'])
-                if player_id in ev['player'].unique():
+                if player_id in ev['player_id'].unique():
                     all_events.append(ev)
             if not all_events:
                 return {"error": "No data found for player."}
@@ -132,14 +132,14 @@ async def get_player_performance_trend(
             events = fdm.get_events_for_team(competition_id, season_id, team_id)
             if events is None or events.empty:
                 return {"error": "No data found for team in this competition/season."}
-            player_events = events[events['player'] == player_id]
+            player_events = events[events['player_id'] == player_id]
             matches = player_events['match_id'].unique()
         else:
             matches_df = fdm.get_matches(competition_id, season_id)
             matches = []
             for _, match in matches_df.iterrows():
                 ev = fdm.get_events(match['match_id'])
-                if player_id in ev['player'].unique():
+                if player_id in ev['player_id'].unique():
                     matches.append((match, ev))
         if not matches or (isinstance(matches, list) and not matches):
             return {"error": "No data found for player."}
@@ -154,7 +154,7 @@ async def get_player_performance_trend(
         # Aggregate metric per match
         trend_data = []
         for i, (match, events) in enumerate(matches):
-            player_events = events[events['player'] == player_id]
+            player_events = events[events['player_id'] == player_id]
             if metric == "goals":
                 value = len(player_events[(player_events['type'] == 'Shot') & (player_events['shot_outcome'] == 'Goal')])
             elif metric == "assists":
@@ -227,14 +227,14 @@ async def get_player_event_map(
             all_events = []
             for _, match in matches_df.iterrows():
                 ev = fdm.get_events(match['match_id'])
-                if player_id in ev['player'].unique():
+                if player_id in ev['player_id'].unique():
                     all_events.append(ev)
             if not all_events:
                 return {"error": "No data found for player."}
             events = pd.concat(all_events)
         else:
             return {"error": "Insufficient selector parameters. Provide match_id or (competition_id, season_id[, team_id])."}
-        player_events = events[events['player'] == player_id]
+        player_events = events[events['player_id'] == player_id]
         # Filter by event type
         if event_type == "passes":
             player_events = player_events[player_events['type'] == 'Pass']
@@ -296,20 +296,20 @@ async def get_player_percentile_ranks(
             return {"error": "No data found for competition/season/team."}
         # Determine position group if not specified
         if not position_group:
-            player_row = events[events['player'] == player_id].iloc[0]
+            player_row = events[events['player_id'] == player_id].iloc[0]
             position_group = player_row.get('position', 'Unknown')
         # Filter to players in position group with min_minutes
-        player_minutes = events.groupby('player')['minute'].sum()
+        player_minutes = events.groupby('player_id')['minute'].sum()
         eligible_players = player_minutes[player_minutes >= min_minutes].index
-        group_events = events[(events['player'].isin(eligible_players)) & (events['position'] == position_group)]
+        group_events = events[(events['player_id'].isin(eligible_players)) & (events['position'] == position_group)]
         # Define metrics
         metrics = [
             "goals", "assists", "xg", "shots", "passes_completed", "pass_accuracy"
         ]
         # Calculate raw values for all players
         player_stats = {}
-        for player in group_events['player'].unique():
-            pe = group_events[group_events['player'] == player]
+        for player in group_events['player_id'].unique():
+            pe = group_events[group_events['player_id'] == player]
             goals = len(pe[(pe['type'] == 'Shot') & (pe['shot_outcome'] == 'Goal')])
             assists = len(pe[pe['type'] == 'Pass'])  # Placeholder
             xg = pe['shot_statsbomb_xg'].sum() if 'shot_statsbomb_xg' in pe else 0
