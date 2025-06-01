@@ -37,12 +37,13 @@ async def get_dashboard_summary(
                 "goals": team_metrics.get("goals", 0),
                 "xG": team_metrics.get("xg", 0),
                 "possession": team_metrics.get("possession_pct", 0),
-                "ppda": team_metrics.get("ppda", 0),
+                # "ppda": team_metrics.get("ppda", 0),
                 "pass_success": team_metrics.get("pass_completion", 0)
             },
             "competition_id": competition_id,
             "team_id": team_id,
-            "season_id": season_id
+            "season_id": season_id,
+            "events" : events['team_id'].unique().tolist() if 'team_id' in events else events['team'].unique().tolist()
         }
     except Exception as e:
         logger.error(f"Error getting dashboard summary: {str(e)}")
