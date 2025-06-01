@@ -531,12 +531,20 @@ class MetricsEngine:
         }
 
     def _extract_team_match_metrics(self, match_metrics: Dict[str, Any], team_id: int) -> Dict[str, Any]:
-        """Extract team-specific metrics from match metrics"""
-        # This would extract team metrics from overall match metrics
-        # Placeholder implementation
-        is_home = True  # In real implementation, would check if team_id matches home_team_id
-
-        team_key = "home" if is_home else "away"
+        """Extract team-specific metrics from match metrics using new schema"""
+        # Determine if the team is home or away
+        home_team_id = match_metrics.get("home_team_id")
+        away_team_id = match_metrics.get("away_team_id")
+        if home_team_id is not None and team_id == home_team_id:
+            team_key = "home"
+            opp_key = "away"
+        elif away_team_id is not None and team_id == away_team_id:
+            team_key = "away"
+            opp_key = "home"
+        else:
+            # Fallback: unknown team role
+            team_key = "home"
+            opp_key = "away"
 
         return {
             "team_id": team_id,
@@ -547,6 +555,8 @@ class MetricsEngine:
             "shots": match_metrics.get("shots", {}).get(f"{team_key}_shots", 0),
             "xg_for": match_metrics.get("shots", {}).get(f"{team_key}_xg", 0),
             "goals_for": match_metrics.get("shots", {}).get(f"{team_key}_goals", 0),
+            "goals_against": match_metrics.get("shots", {}).get(f"{opp_key}_goals", 0),
+            "xg_against": match_metrics.get("shots", {}).get(f"{opp_key}_xg", 0),
             "defensive_actions": match_metrics.get("defensive", {}).get(f"{team_key}_defensive_actions", 0),
             "ppda": match_metrics.get("ppda", {}).get(team_key, {}).get("ppda", 0)
         }

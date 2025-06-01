@@ -41,8 +41,8 @@ async def get_head_to_head(
             match_id = match['match_id']
             events = fdm.get_events(match_id)
             # Get goals and xG
-            home_goals = len(events[(events['team_id'] == match['home_team_id']) & (events['type'] == 'Shot') & (events['shot_outcome'] == 'Goal')])
-            away_goals = len(events[(events['team_id'] == match['away_team_id']) & (events['type'] == 'Shot') & (events['shot_outcome'] == 'Goal')])
+            home_goals = len(events[(events['team_id'] == match['home_team_id']) & (events['type_name'] == 'Shot') & (events['shot_outcome'] == 'Goal')])
+            away_goals = len(events[(events['team_id'] == match['away_team_id']) & (events['type_name'] == 'Shot') & (events['shot_outcome'] == 'Goal')])
             home_xg = events[events['team_id'] == match['home_team_id']]['shot_statsbomb_xg'].sum() if 'shot_statsbomb_xg' in events else 0
             away_xg = events[events['team_id'] == match['away_team_id']]['shot_statsbomb_xg'].sum() if 'shot_statsbomb_xg' in events else 0
             # Determine winner
@@ -137,10 +137,10 @@ async def get_team_style_comparison(
             "defensive_line_height", "counter_attack_frequency", "set_piece_reliance"
         ]
         def calc_style(ev):
-            total_passes = len(ev[ev['type'] == 'Pass'])
-            forward_passes = len(ev[(ev['type'] == 'Pass') & (ev.get('pass_angle', 0) < 45)])
+            total_passes = len(ev[ev['type_name'] == 'Pass'])
+            forward_passes = len(ev[(ev['type_name'] == 'Pass') & (ev.get('pass_angle', 0) < 45)])
             possession = 100 * len(ev[ev['possession_team'] == team_id]) / max(1, len(ev))
-            pressing = len(ev[ev['type'] == 'Pressure']) / max(1, len(ev)) * 100
+            pressing = len(ev[ev['type_name'] == 'Pressure']) / max(1, len(ev)) * 100
             return {
                 "possession": possession,
                 "build_up_speed": 0,  # Placeholder
@@ -208,9 +208,9 @@ async def get_matchup_prediction(
             row = matches_df[(matches_df['home_team_id'] == team_id) | (matches_df['away_team_id'] == team_id)]
             if not row.empty:
                 if row.iloc[0]['home_team_id'] == team_id:
-                    return row.iloc[0]['home_team']
+                    return row.iloc[0]['home_team_name']
                 else:
-                    return row.iloc[0]['away_team']
+                    return row.iloc[0]['away_team_name']
             return None
         team1_name = get_team_name(team1_id)
         team2_name = get_team_name(team2_id)
@@ -219,7 +219,7 @@ async def get_matchup_prediction(
             te = events[events['team_id'] == tid]
             matches = te['match_id'].nunique()
             possession = 100 * len(te[te['possession_team'] == tid]) / max(1, len(te))
-            shots = len(te[te['type'] == 'Shot']) / max(1, matches)
+            shots = len(te[te['type_name'] == 'Shot']) / max(1, matches)
             xg = te['shot_statsbomb_xg'].sum() / max(1, matches) if 'shot_statsbomb_xg' in te else 0
             return possession, shots, xg
         team1_poss, team1_shots, team1_xg = team_stats(team1_id)
@@ -318,9 +318,9 @@ async def get_league_benchmarks(
         team_row = matches_df[(matches_df['home_team_id'] == team_id) | (matches_df['away_team_id'] == team_id)]
         if not team_row.empty:
             if team_row.iloc[0]['home_team_id'] == team_id:
-                team_name = team_row.iloc[0]['home_team']
+                team_name = team_row.iloc[0]['home_team_name']
             else:
-                team_name = team_row.iloc[0]['away_team']
+                team_name = team_row.iloc[0]['away_team_name']
         else:
             team_name = f"Team {team_id}"
         # Default metrics if none specified
@@ -335,25 +335,25 @@ async def get_league_benchmarks(
         for tid in team_ids:
             te = events[events['team_id'] == tid]
             matches_played = te['match_id'].nunique()
-            goals = len(te[(te['type'] == 'Shot') & (te['shot_outcome'] == 'Goal')]) / max(1, matches_played)
+            goals = len(te[(te['type_name'] == 'Shot') & (te['shot_outcome'] == 'Goal')]) / max(1, matches_played)
             xg = te['shot_statsbomb_xg'].sum() / max(1, matches_played) if 'shot_statsbomb_xg' in te else 0
-            shots = len(te[te['type'] == 'Shot']) / max(1, matches_played)
-            passes = te[te['type'] == 'Pass']
+            shots = len(te[te['type_name'] == 'Shot']) / max(1, matches_played)
+            passes = te[te['type_name'] == 'Pass']
             completed_passes = passes[passes['pass_outcome'].isna()]
             pass_accuracy = len(completed_passes) / max(1, len(passes)) * 100 if len(passes) > 0 else 0
             possessions = len(events[events['possession_team'] == tid]['possession'].unique())
             total_possessions = len(events['possession'].unique())
             possession = possessions / max(1, total_possessions) * 100 if total_possessions > 0 else 0
             # PPDA: passes allowed per defensive action in opposition half
-            opp_passes_own_half = events[(events['team_id'] != tid) & (events['type'] == 'Pass') & (events['location'].apply(lambda x: isinstance(x, list) and len(x) >= 2 and x[0] < 60))]
-            def_actions_opp_half = te[(te['type'].isin(['Pressure', 'Duel', 'Interception'])) & (te['location'].apply(lambda x: isinstance(x, list) and len(x) >= 2 and x[0] >= 60))]
+            opp_passes_own_half = events[(events['team_id'] != tid) & (events['type_name'] == 'Pass') & (events['location'].apply(lambda x: isinstance(x, list) and len(x) >= 2 and x[0] < 60))]
+            def_actions_opp_half = te[(te['type_name'].isin(['Pressure', 'Duel', 'Interception'])) & (te['location'].apply(lambda x: isinstance(x, list) and len(x) >= 2 and x[0] >= 60))]
             ppda = len(opp_passes_own_half) / max(1, len(def_actions_opp_half))
             # Challenge success rate: duels won / duels
-            duels = te[te['type'] == 'Duel']
+            duels = te[te['type_name'] == 'Duel']
             duels_won = duels[duels.get('duel_outcome', None) == 'Won'] if 'duel_outcome' in duels else duels[[]]
             challenge_success_rate = len(duels_won) / max(1, len(duels)) * 100 if len(duels) > 0 else 0
             # xG against per game
-            opp_shots = events[(events['team_id'] != tid) & (events['type'] == 'Shot')]
+            opp_shots = events[(events['team_id'] != tid) & (events['type_name'] == 'Shot')]
             xg_against = opp_shots['shot_statsbomb_xg'].sum() / max(1, matches_played) if 'shot_statsbomb_xg' in opp_shots else 0
             team_stats[tid] = {
                 "goals_per_game": goals,

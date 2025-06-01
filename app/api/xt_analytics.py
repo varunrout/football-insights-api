@@ -210,7 +210,7 @@ async def get_zone_effectiveness(
         grid_x, grid_y = 6, 4
         x_bins = np.linspace(0, 120, grid_x + 1)
         y_bins = np.linspace(0, 80, grid_y + 1)
-        xt_events = xt_events[xt_events['type'].isin(['Pass', 'Carry'])]
+        xt_events = xt_events[xt_events['type_name'].isin(['Pass', 'Carry'])]
         xt_events = xt_events[xt_events['location'].apply(lambda loc: isinstance(loc, list) and len(loc) == 2)]
         xt_events['zone_x'] = xt_events['location'].apply(lambda loc: np.digitize(loc[0], x_bins) - 1)
         xt_events['zone_y'] = xt_events['location'].apply(lambda loc: np.digitize(loc[1], y_bins) - 1)
