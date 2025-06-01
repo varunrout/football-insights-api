@@ -257,10 +257,13 @@ async def get_player_scatter_comparison(
                 p["minutes"] = float(p["minutes"])
             if "highlighted" in p:
                 p["highlighted"] = bool(p["highlighted"])
-        if isinstance(x_avg, (np.integer, np.floating)):
-            x_avg = float(x_avg)
-        if isinstance(y_avg, (np.integer, np.floating)):
-            y_avg = float(y_avg)
+        # Compute averages safely
+        if players:
+            x_avg = float(np.mean([p["x_value"] for p in players]))
+            y_avg = float(np.mean([p["y_value"] for p in players]))
+        else:
+            x_avg = 0.0
+            y_avg = 0.0
         return {
             "players": players,
             "x_metric": x_metric,
