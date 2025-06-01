@@ -4,6 +4,7 @@ import logging
 from app.util.football_data_manager import FootballDataManager
 from app.services.metric_calculator import calculate_xt_added
 import pandas as pd
+import numpy as np
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -98,6 +99,30 @@ async def get_player_profile(
                 "minutes_played": match_events['minute'].sum()
             })
         
+        # Convert numpy types to native Python types for JSON serialization
+        player_info["player_id"] = int(player_info["player_id"])
+        if isinstance(minutes_played, (np.integer, np.floating)):
+            minutes_played = float(minutes_played)
+        if isinstance(matches_played, (np.integer, np.floating)):
+            matches_played = int(matches_played)
+        playing_time["matches_played"] = int(playing_time["matches_played"])
+        playing_time["minutes_played"] = float(playing_time["minutes_played"])
+        playing_time["minutes_per_match"] = float(playing_time["minutes_per_match"])
+        for k in performance_metrics:
+            if isinstance(performance_metrics[k], (np.integer, np.floating)):
+                performance_metrics[k] = float(performance_metrics[k])
+        for k in per_90_metrics:
+            if isinstance(per_90_metrics[k], (np.integer, np.floating)):
+                per_90_metrics[k] = float(per_90_metrics[k])
+        for f in form_data:
+            if "goals" in f and isinstance(f["goals"], (np.integer, np.floating)):
+                f["goals"] = float(f["goals"])
+            if "shots" in f and isinstance(f["shots"], (np.integer, np.floating)):
+                f["shots"] = float(f["shots"])
+            if "passes_completed" in f and isinstance(f["passes_completed"], (np.integer, np.floating)):
+                f["passes_completed"] = float(f["passes_completed"])
+            if "minutes_played" in f and isinstance(f["minutes_played"], (np.integer, np.floating)):
+                f["minutes_played"] = float(f["minutes_played"])
         return {
             "player_info": player_info,
             "playing_time": playing_time,
@@ -325,7 +350,6 @@ async def get_player_percentile_ranks(
                 "pass_accuracy": pass_accuracy
             }
         # Calculate percentiles for the requested player
-        import numpy as np
         percentiles = {}
         comparison_values = {}
         for metric in metrics:
