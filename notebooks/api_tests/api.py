@@ -64,6 +64,13 @@ if __name__ == "__main__":
     get("tactical-insights/defensive-metrics", params={"team_id": 904, "competition_id": 9, "season_id": 281})
     get("tactical-insights/offensive-metrics", params={"team_id": 904, "competition_id": 9, "season_id": 281})
     get("tactical-insights/pass-network", params={"team_id": 904, "match_id": 3895302})
+    get("tactical-insights/build-up-analysis", params={"team_id": 904, "competition_id": 9, "season_id": 281})
+    get("tactical-insights/pressing-analysis", params={"team_id": 904, "competition_id": 9, "season_id": 281})
+    get("tactical-insights/transitions", params={"team_id": 904, "competition_id": 9, "season_id": 281})
+    get("tactical-insights/set-pieces", params={"team_id": 904, "competition_id": 9, "season_id": 281})
+    get("tactical-insights/formation-analysis", params={"team_id": 904, "match_id": 3895302})
+    get("tactical-insights/team-style", params={"team_id": 904, "competition_id": 9, "season_id": 281})
+    get("tactical-insights/style-comparison", params={"team_id1": 904, "team_id2": 169, "competition_id": 9, "season_id": 281})
 
     # --- New matchup analysis endpoints ---
     print("Testing matchup analysis endpoints (new logic):")
