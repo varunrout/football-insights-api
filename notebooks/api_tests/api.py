@@ -26,38 +26,38 @@ def get(endpoint, params=None):
 
 if __name__ == "__main__":
     # --- New selector endpoints ---
-    # print("Testing selector endpoints (new logic):")
-    # get("core-selectors/competitions")
-    # get("core-selectors/seasons", params={"competition_id": 9})
-    # get("core-selectors/teams", params={"competition_id": 9, "season_id": 281, "team_id": 904})
-    # get("core-selectors/matches", params={"competition_id": 9, "season_id": 281})
-    # get("core-selectors/players", params={"competition_id": 9, "season_id": 281, "team_id": 904})
+    print("Testing selector endpoints (new logic):")
+    get("core-selectors/competitions")
+    get("core-selectors/seasons", params={"competition_id": 9})
+    get("core-selectors/teams", params={"competition_id": 9, "season_id": 281, "team_id": 904})
+    get("core-selectors/matches", params={"competition_id": 9, "season_id": 281})
+    get("core-selectors/players", params={"competition_id": 9, "season_id": 281, "team_id": 904})
 
     # --- New xT analytics endpoints ---
-    # print("Testing xT analytics endpoints (new logic):")
-    # get("xt-analytics/model")
-    # get("xt-analytics/player-rankings", params={"competition_id": 9, "season_id": 281, "team_id": 904})
-    # get("xt-analytics/pass-map", params={"match_id": 3895302})
-    # get("xt-analytics/team-contribution", params={"competition_id": 9, "season_id": 281, "team_id": 904})
+    print("Testing xT analytics endpoints (new logic):")
+    get("xt-analytics/model")
+    get("xt-analytics/player-rankings", params={"competition_id": 9, "season_id": 281, "team_id": 904})
+    get("xt-analytics/pass-map", params={"match_id": 3895302})
+    get("xt-analytics/team-contribution", params={"competition_id": 9, "season_id": 281, "team_id": 904})
 
     # --- New dashboard endpoints ---
-    # print("Testing dashboard endpoints (new logic):")
-    # get("dashboard/summary", params={"competition_id": 9, "season_id": 281, "team_id": 904})
-    # get("dashboard/xg-timeline", params={"competition_id": 9, "season_id": 281, "team_id": 904})
-    # get("dashboard/shot-map", params={"competition_id": 9, "season_id": 281, "team_id": 904})
+    print("Testing dashboard endpoints (new logic):")
+    get("dashboard/summary", params={"competition_id": 9, "season_id": 281, "team_id": 904})
+    get("dashboard/xg-timeline", params={"competition_id": 9, "season_id": 281, "team_id": 904})
+    get("dashboard/shot-map", params={"competition_id": 9, "season_id": 281, "team_id": 904})
 
     # --- New player analysis endpoints ---
-    # print("Testing player analysis endpoints (new logic):")
-    # get("player-analysis/profile", params={"player_id": 40724, "competition_id": 9, "season_id": 281})
-    # get("player-analysis/performance-trend", params={"player_id": 32712, "metric": "goals", "timeframe": "last5", "competition_id": 9, "season_id": 281})
-    # get("player-analysis/event-map", params={"player_id": 32712, "event_type": "shots", "competition_id": 9, "season_id": 281})
+    print("Testing player analysis endpoints (new logic):")
+    get("player-analysis/profile", params={"player_id": 40724, "competition_id": 9, "season_id": 281})
+    get("player-analysis/performance-trend", params={"player_id": 32712, "metric": "goals", "timeframe": "last5", "competition_id": 9, "season_id": 281})
+    get("player-analysis/event-map", params={"player_id": 32712, "event_type": "shots", "competition_id": 9, "season_id": 281})
 
     # --- New player comparison endpoints ---
-    # print("Testing player comparison endpoints (new logic):")
-    # get("player-comparison/radar", params={"player_ids": [40724, 32712, 38004], "competition_id": 9, "season_id": 281})
-    # get("player-comparison/bar-chart", params={"player_ids": [40724, 32712, 38004], "competition_id": 9, "season_id": 281, "metric": "goals"})
-    # get("player-comparison/scatter-plot", params={"competition_id": 9, "season_id": 281, "x_metric": "xg", "y_metric": "shots"})
-    # get("player-comparison/similarity-map", params={"player_id": 38004, "competition_id": 9, "season_id": 281})
+    print("Testing player comparison endpoints (new logic):")
+    get("player-comparison/radar", params={"player_ids": [40724, 32712, 38004], "competition_id": 9, "season_id": 281})
+    get("player-comparison/bar-chart", params={"player_ids": [40724, 32712, 38004], "competition_id": 9, "season_id": 281, "metric": "goals"})
+    get("player-comparison/scatter-plot", params={"competition_id": 9, "season_id": 281, "x_metric": "xg", "y_metric": "shots"})
+    get("player-comparison/similarity-map", params={"player_id": 38004, "competition_id": 9, "season_id": 281})
 
     # --- New tactical insights endpoints ---
     print("Testing tactical insights endpoints (new logic):")
@@ -73,6 +73,6 @@ if __name__ == "__main__":
 
 
     # Save all results to CSV
-    # df = pd.DataFrame(results)
-    # df.to_csv("api_responses.csv", index=False)
-    # print("All API responses saved to api_responses.csv")
+    df = pd.DataFrame(results)
+    df.to_csv("api_responses.csv", index=False)
+    print("All API responses saved to api_responses.csv")
