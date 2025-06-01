@@ -52,14 +52,14 @@ async def get_player_radar_comparison(
             pe = events[events['player_id'] == player_id]
             minutes = pe['minute'].sum()
             # Calculate metrics
-            goals = len(pe[(pe['type'] == 'Shot') & (pe['shot_outcome'] == 'Goal')])
-            assists = len(pe[pe['type'] == 'Pass'])  # Placeholder
+            goals = len(pe[(pe['type_name'] == 'Shot') & (pe['shot_outcome'] == 'Goal')])
+            assists = len(pe[pe['type_name'] == 'Pass'])  # Placeholder
             xg = pe['shot_statsbomb_xg'].sum() if 'shot_statsbomb_xg' in pe else 0
             # For advanced metrics, use pass/carry logic as needed
-            progressive_passes = len(pe[pe['type'] == 'Pass'])  # Placeholder
-            successful_dribbles = len(pe[pe['type'] == 'Carry'])  # Placeholder
-            defensive_actions = len(pe[pe['type'].isin(['Duel', 'Interception', 'Tackle', 'Block'])])
-            pressures = len(pe[pe['type'] == 'Pressure'])
+            progressive_passes = len(pe[pe['type_name'] == 'Pass'])  # Placeholder
+            successful_dribbles = len(pe[pe['type_name'] == 'Carry'])  # Placeholder
+            defensive_actions = len(pe[pe['type_name'].isin(['Duel', 'Interception', 'Tackle', 'Block'])])
+            pressures = len(pe[pe['type_name'] == 'Pressure'])
             # Per 90
             per_90 = lambda v: v / (minutes / 90) if minutes > 0 else 0
             player_metrics = {
@@ -134,9 +134,9 @@ async def get_player_bar_comparison(
             minutes = pe['minute'].sum()
             # Calculate metric value
             if metric == "goals":
-                value = len(pe[(pe['type'] == 'Shot') & (pe['shot_outcome'] == 'Goal')])
+                value = len(pe[(pe['type_name'] == 'Shot') & (pe['shot_outcome'] == 'Goal')])
             elif metric == "assists":
-                value = len(pe[pe['type'] == 'Pass'])  # Placeholder
+                value = len(pe[pe['type_name'] == 'Pass'])  # Placeholder
             elif metric == "xg":
                 value = pe['shot_statsbomb_xg'].sum() if 'shot_statsbomb_xg' in pe else 0
             elif metric == "xa":
@@ -202,9 +202,9 @@ async def get_player_scatter_comparison(
             # Calculate metrics
             def get_metric(metric):
                 if metric == "goals":
-                    return len(pe[(pe['type'] == 'Shot') & (pe['shot_outcome'] == 'Goal')])
+                    return len(pe[(pe['type_name'] == 'Shot') & (pe['shot_outcome'] == 'Goal')])
                 elif metric == "assists":
-                    return len(pe[pe['type'] == 'Pass'])  # Placeholder
+                    return len(pe[pe['type_name'] == 'Pass'])  # Placeholder
                 elif metric == "xg":
                     return pe['shot_statsbomb_xg'].sum() if 'shot_statsbomb_xg' in pe else 0
                 elif metric == "xa":
@@ -276,13 +276,13 @@ async def get_player_similarity_map(
             minutes = pe['minute'].sum()
             if minutes < min_minutes:
                 continue
-            goals = len(pe[(pe['type'] == 'Shot') & (pe['shot_outcome'] == 'Goal')])
-            assists = len(pe[pe['type'] == 'Pass'])  # Placeholder
+            goals = len(pe[(pe['type_name'] == 'Shot') & (pe['shot_outcome'] == 'Goal')])
+            assists = len(pe[pe['type_name'] == 'Pass'])  # Placeholder
             xg = pe['shot_statsbomb_xg'].sum() if 'shot_statsbomb_xg' in pe else 0
-            progressive_passes = len(pe[pe['type'] == 'Pass'])  # Placeholder
-            successful_dribbles = len(pe[pe['type'] == 'Carry'])  # Placeholder
-            defensive_actions = len(pe[pe['type'].isin(['Duel', 'Interception', 'Tackle', 'Block'])])
-            pressures = len(pe[pe['type'] == 'Pressure'])
+            progressive_passes = len(pe[pe['type_name'] == 'Pass'])  # Placeholder
+            successful_dribbles = len(pe[pe['type_name'] == 'Carry'])  # Placeholder
+            defensive_actions = len(pe[pe['type_name'].isin(['Duel', 'Interception', 'Tackle', 'Block'])])
+            pressures = len(pe[pe['type_name'] == 'Pressure'])
             per_90 = lambda v: v / (minutes / 90) if minutes > 0 else 0
             player_vectors[pid] = np.array([
                 per_90(goals),

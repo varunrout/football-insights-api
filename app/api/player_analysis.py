@@ -68,12 +68,12 @@ async def get_player_profile(
         }
         
         # Performance metrics
-        goals = len(player_events[(player_events['type'] == 'Shot') & (player_events['shot_outcome'] == 'Goal')])
-        assists = len(player_events[player_events['type'] == 'Pass'])  # Placeholder: refine with assist logic
+        goals = len(player_events[(player_events['type_name'] == 'Shot') & (player_events['shot_outcome'] == 'Goal')])
+        assists = len(player_events[player_events['type_name'] == 'Pass'])  # Placeholder: refine with assist logic
         xg = player_events['shot_statsbomb_xg'].sum() if 'shot_statsbomb_xg' in player_events else 0
-        shots = len(player_events[player_events['type'] == 'Shot'])
-        passes_completed = len(player_events[(player_events['type'] == 'Pass') & (player_events['pass_outcome'].isna())])
-        pass_accuracy = passes_completed / max(1, len(player_events[player_events['type'] == 'Pass'])) * 100
+        shots = len(player_events[player_events['type_name'] == 'Shot'])
+        passes_completed = len(player_events[(player_events['type_name'] == 'Pass') & (player_events['pass_outcome'].isna())])
+        pass_accuracy = passes_completed / max(1, len(player_events[player_events['type_name'] == 'Pass'])) * 100
         performance_metrics = {
             "goals": goals,
             "assists": assists,
@@ -92,9 +92,9 @@ async def get_player_profile(
             match_events = player_events[player_events['match_id'] == match_id]
             form_data.append({
                 "match_id": match_id,
-                "goals": len(match_events[(match_events['type'] == 'Shot') & (match_events['shot_outcome'] == 'Goal')]),
-                "shots": len(match_events[match_events['type'] == 'Shot']),
-                "passes_completed": len(match_events[(match_events['type'] == 'Pass') & (match_events['pass_outcome'].isna())]),
+                "goals": len(match_events[(match_events['type_name'] == 'Shot') & (match_events['shot_outcome'] == 'Goal')]),
+                "shots": len(match_events[match_events['type_name'] == 'Shot']),
+                "passes_completed": len(match_events[(match_events['type_name'] == 'Pass') & (match_events['pass_outcome'].isna())]),
                 "minutes_played": match_events['minute'].sum()
             })
         
@@ -156,19 +156,19 @@ async def get_player_performance_trend(
         for i, (match, events) in enumerate(matches):
             player_events = events[events['player_id'] == player_id]
             if metric == "goals":
-                value = len(player_events[(player_events['type'] == 'Shot') & (player_events['shot_outcome'] == 'Goal')])
+                value = len(player_events[(player_events['type_name'] == 'Shot') & (player_events['shot_outcome'] == 'Goal')])
             elif metric == "assists":
-                value = len(player_events[player_events['type'] == 'Pass'])  # Placeholder: refine with assist logic
+                value = len(player_events[player_events['type_name'] == 'Pass'])  # Placeholder: refine with assist logic
             elif metric == "xg":
                 value = player_events['shot_statsbomb_xg'].sum() if 'shot_statsbomb_xg' in player_events else 0
             elif metric == "shots":
-                value = len(player_events[player_events['type'] == 'Shot'])
+                value = len(player_events[player_events['type_name'] == 'Shot'])
             elif metric == "key_passes":
-                value = len(player_events[player_events['type'] == 'Pass'])  # Placeholder: refine with key pass logic
+                value = len(player_events[player_events['type_name'] == 'Pass'])  # Placeholder: refine with key pass logic
             elif metric == "tackles":
-                value = len(player_events[player_events['type'] == 'Duel'])
+                value = len(player_events[player_events['type_name'] == 'Duel'])
             elif metric == "pass_accuracy":
-                passes = player_events[player_events['type'] == 'Pass']
+                passes = player_events[player_events['type_name'] == 'Pass']
                 completed = passes[passes['pass_outcome'].isna()]
                 value = len(completed) / max(1, len(passes)) * 100
             else:
@@ -237,23 +237,23 @@ async def get_player_event_map(
         player_events = events[events['player_id'] == player_id]
         # Filter by event type
         if event_type == "passes":
-            player_events = player_events[player_events['type'] == 'Pass']
+            player_events = player_events[player_events['type_name'] == 'Pass']
         elif event_type == "shots":
-            player_events = player_events[player_events['type'] == 'Shot']
+            player_events = player_events[player_events['type_name'] == 'Shot']
         elif event_type == "defensive":
-            player_events = player_events[player_events['type'].isin(['Duel', 'Interception', 'Tackle', 'Block'])]
+            player_events = player_events[player_events['type_name'].isin(['Duel', 'Interception', 'Tackle', 'Block'])]
         # Build event list
         event_list = []
         for _, row in player_events.iterrows():
             event = {
                 "id": row.name,
-                "type": row['type'],
+                "type": row['type_name'],
                 "x": row['location'][0] if isinstance(row['location'], list) else None,
                 "y": row['location'][1] if isinstance(row['location'], list) else None,
                 "minute": row['minute'],
-                "success": row.get('pass_outcome', None) is None if row['type'] == 'Pass' else None,
-                "end_x": row['pass_end_location'][0] if row['type'] == 'Pass' and isinstance(row.get('pass_end_location'), list) else None,
-                "end_y": row['pass_end_location'][1] if row['type'] == 'Pass' and isinstance(row.get('pass_end_location'), list) else None
+                "success": row.get('pass_outcome', None) is None if row['type_name'] == 'Pass' else None,
+                "end_x": row['pass_end_location'][0] if row['type_name'] == 'Pass' and isinstance(row.get('pass_end_location'), list) else None,
+                "end_y": row['pass_end_location'][1] if row['type_name'] == 'Pass' and isinstance(row.get('pass_end_location'), list) else None
             }
             event_list.append(event)
         return {
@@ -310,12 +310,12 @@ async def get_player_percentile_ranks(
         player_stats = {}
         for player in group_events['player_id'].unique():
             pe = group_events[group_events['player_id'] == player]
-            goals = len(pe[(pe['type'] == 'Shot') & (pe['shot_outcome'] == 'Goal')])
-            assists = len(pe[pe['type'] == 'Pass'])  # Placeholder
+            goals = len(pe[(pe['type_name'] == 'Shot') & (pe['shot_outcome'] == 'Goal')])
+            assists = len(pe[pe['type_name'] == 'Pass'])  # Placeholder
             xg = pe['shot_statsbomb_xg'].sum() if 'shot_statsbomb_xg' in pe else 0
-            shots = len(pe[pe['type'] == 'Shot'])
-            passes_completed = len(pe[(pe['type'] == 'Pass') & (pe['pass_outcome'].isna())])
-            pass_accuracy = passes_completed / max(1, len(pe[pe['type'] == 'Pass'])) * 100
+            shots = len(pe[pe['type_name'] == 'Shot'])
+            passes_completed = len(pe[(pe['type_name'] == 'Pass') & (pe['pass_outcome'].isna())])
+            pass_accuracy = passes_completed / max(1, len(pe[pe['type_name'] == 'Pass'])) * 100
             player_stats[player] = {
                 "goals": goals,
                 "assists": assists,
