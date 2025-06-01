@@ -33,7 +33,7 @@ def generate_pass_network(events_df: pd.DataFrame, team_id: Optional[int] = None
         return {"nodes": [], "edges": [], "team_id": team_id}
 
     # Filter for passes
-    pass_events = events_df[events_df['type'] == 'Pass'].copy()
+    pass_events = events_df[events_df['type_name'] == 'Pass'].copy()
 
     if pass_events.empty:
         logger.warning("No pass events found in the provided data")
@@ -42,7 +42,7 @@ def generate_pass_network(events_df: pd.DataFrame, team_id: Optional[int] = None
     # Determine team if not provided
     if team_id is None:
         # Use the team with the most passes
-        team_counts = pass_events['team'].value_counts()
+        team_counts = pass_events['team_id'].value_counts()
         if not team_counts.empty:
             team_id = team_counts.index[0]
             logger.info(f"Team ID not provided, using team with most passes: {team_id}")
@@ -51,7 +51,7 @@ def generate_pass_network(events_df: pd.DataFrame, team_id: Optional[int] = None
             return {"nodes": [], "edges": [], "team_id": None}
 
     # Filter for the specified team
-    team_passes = pass_events[pass_events['team'] == team_id]
+    team_passes = pass_events[pass_events['team_id'] == team_id]
 
     if team_passes.empty:
         logger.warning(f"No passes found for team {team_id}")
@@ -69,14 +69,14 @@ def generate_pass_network(events_df: pd.DataFrame, team_id: Optional[int] = None
 
     # Process passes to build the network
     for _, pass_event in team_passes.iterrows():
-        passer = pass_event.get('player')
+        passer = pass_event.get('player_name') or pass_event.get('player_id')
 
         # Skip passes without player info
         if pd.isna(passer):
             continue
 
         # Get pass recipient (if available)
-        recipient = pass_event.get('pass_recipient')
+        recipient = pass_event.get('pass_recipient_name') or pass_event.get('pass_recipient_id')
 
         # Skip passes without recipient info
         if pd.isna(recipient):
