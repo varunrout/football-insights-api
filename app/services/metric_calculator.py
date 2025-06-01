@@ -88,7 +88,7 @@ def calculate_ppda(events_df, team, opposition_half_only=True):
         PPDA value
     """
     # Get opposition team
-    teams = events_df['team'].unique()
+    teams = events_df['team_name'].unique()
     opposition_team = [t for t in teams if t != team][0] if len(teams) > 1 else None
     
     if not opposition_team:
@@ -117,7 +117,7 @@ def identify_progressive_passes(events_df, distance_threshold=10):
         DataFrame of progressive passes
     """
     # Filter for passes only
-    passes = events_df[events_df['type'] == 'Pass'].copy()
+    passes = events_df[events_df['type_name'] == 'Pass'].copy()
     
     # Calculate forward progression
     progressive_passes = []
