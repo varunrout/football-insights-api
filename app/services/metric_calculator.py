@@ -52,19 +52,25 @@ def calculate_xt_added(events_df, xt_model=None):
     Returns:
         DataFrame with xT values added
     """
+    from app.util.metrics.expected_threat import ExpectedThreatModel
+    import logging
+    logger = logging.getLogger(__name__)
     if xt_model is None:
         try:
             xt_model = load_xt_model()
         except FileNotFoundError:
             raise ValueError("No xT model provided and none found on disk. Please provide an xT model.")
-    
+    # Type check: ensure xt_model is an ExpectedThreatModel
+    if not isinstance(xt_model, ExpectedThreatModel):
+        logger.warning(f"xt_model is not an ExpectedThreatModel (got {type(xt_model)}), reloading.")
+        xt_model = load_xt_model()
+        if not isinstance(xt_model, ExpectedThreatModel):
+            raise ValueError(f"xt_model is not a valid ExpectedThreatModel after reload (got {type(xt_model)})")
     # Use the ExpectedThreatModel's comprehensive implementation
     events_with_xt = xt_model.calculate_xt_for_match(events_df)
-
     # Rename columns to match expected format for backward compatibility
     if 'xt_value' in events_with_xt.columns:
         events_with_xt = events_with_xt.rename(columns={'xt_value': 'xt_added'})
-
     return events_with_xt
 
 
