@@ -90,6 +90,17 @@ async def get_player_radar_comparison(
                 for p in player_data:
                     val = p["metrics"][metric]
                     p["metrics"][metric] = (val - metric_ranges[metric]["min"]) / (metric_ranges[metric]["max"] - metric_ranges[metric]["min"])
+        for p in player_data:
+            p["player_id"] = int(p["player_id"])
+            if p["team"] is not None:
+                p["team"] = str(p["team"])
+            if "metrics" in p:
+                for k, v in p["metrics"].items():
+                    if isinstance(v, (np.integer, np.floating)):
+                        p["metrics"][k] = float(v)
+        for k, v in metric_ranges.items():
+            metric_ranges[k]["min"] = float(v["min"])
+            metric_ranges[k]["max"] = float(v["max"])
         return {
             "players": player_data,
             "metrics": metrics,
@@ -152,6 +163,16 @@ async def get_player_bar_comparison(
                 "per_90_value": per_90_value,
                 "minutes": minutes
             })
+        for p in player_data:
+            p["player_id"] = int(p["player_id"])
+            if p["team"] is not None:
+                p["team"] = str(p["team"])
+            if "value" in p and isinstance(p["value"], (np.integer, np.floating)):
+                p["value"] = float(p["value"])
+            if "per_90_value" in p and isinstance(p["per_90_value"], (np.integer, np.floating)):
+                p["per_90_value"] = float(p["per_90_value"])
+            if "minutes" in p and isinstance(p["minutes"], (np.integer, np.floating)):
+                p["minutes"] = float(p["minutes"])
         return {
             "players": player_data,
             "metric": metric,
@@ -224,8 +245,22 @@ async def get_player_scatter_comparison(
                 "minutes": minutes,
                 "highlighted": is_highlighted
             })
-        x_avg = float(np.mean([p["x_value"] for p in players])) if players else 0
-        y_avg = float(np.mean([p["y_value"] for p in players])) if players else 0
+        for p in players:
+            p["player_id"] = int(p["player_id"])
+            if p["team"] is not None:
+                p["team"] = str(p["team"])
+            if "x_value" in p and isinstance(p["x_value"], (np.integer, np.floating)):
+                p["x_value"] = float(p["x_value"])
+            if "y_value" in p and isinstance(p["y_value"], (np.integer, np.floating)):
+                p["y_value"] = float(p["y_value"])
+            if "minutes" in p and isinstance(p["minutes"], (np.integer, np.floating)):
+                p["minutes"] = float(p["minutes"])
+            if "highlighted" in p:
+                p["highlighted"] = bool(p["highlighted"])
+        if isinstance(x_avg, (np.integer, np.floating)):
+            x_avg = float(x_avg)
+        if isinstance(y_avg, (np.integer, np.floating)):
+            y_avg = float(y_avg)
         return {
             "players": players,
             "x_metric": x_metric,
@@ -328,6 +363,28 @@ async def get_player_similarity_map(
             "minutes": pe_ref['minute'].sum(),
             "key_metrics": {m: float(ref_vector[i]) for i, m in enumerate(metrics)}
         }
+        for p in similar_players:
+            p["player_id"] = int(p["player_id"])
+            if p["team"] is not None:
+                p["team"] = str(p["team"])
+            if "minutes" in p and isinstance(p["minutes"], (np.integer, np.floating)):
+                p["minutes"] = float(p["minutes"])
+            if "similarity_score" in p and isinstance(p["similarity_score"], (np.integer, np.floating)):
+                p["similarity_score"] = float(p["similarity_score"])
+            if "key_metrics" in p:
+                for k, v in p["key_metrics"].items():
+                    if isinstance(v, (np.integer, np.floating)):
+                        p["key_metrics"][k] = float(v)
+        if reference_player:
+            reference_player["player_id"] = int(reference_player["player_id"])
+            if reference_player["team"] is not None:
+                reference_player["team"] = str(reference_player["team"])
+            if "minutes" in reference_player and isinstance(reference_player["minutes"], (np.integer, np.floating)):
+                reference_player["minutes"] = float(reference_player["minutes"])
+            if "key_metrics" in reference_player:
+                for k, v in reference_player["key_metrics"].items():
+                    if isinstance(v, (np.integer, np.floating)):
+                        reference_player["key_metrics"][k] = float(v)
         return {
             "reference_player": reference_player,
             "similar_players": similar_players,
