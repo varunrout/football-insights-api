@@ -481,6 +481,9 @@ class TacticalAnalyzer:
 
         build_up_score = (avg_pass_completion / 100 * 10) if avg_pass_completion else 0
         possession_score = (avg_possession / 10) if avg_possession else 0
+        # Ensure avg_ppda is not inf or nan for JSON serialization
+        if avg_ppda is None or not np.isfinite(avg_ppda):
+            avg_ppda = 0
         pressing_score = 10 - (avg_ppda / 2) if avg_ppda else 0
         directness_score = 5.0  # Placeholder
 
