@@ -139,7 +139,7 @@ async def get_team_style_comparison(
         def calc_style(ev):
             total_passes = len(ev[ev['type_name'] == 'Pass'])
             forward_passes = len(ev[(ev['type_name'] == 'Pass') & (ev.get('pass_angle', 0) < 45)])
-            possession = 100 * len(ev[ev['possession_team'] == team_id]) / max(1, len(ev))
+            possession = 100 * len(ev[ev['possession_team_id'] == team_id]) / max(1, len(ev))
             pressing = len(ev[ev['type_name'] == 'Pressure']) / max(1, len(ev)) * 100
             return {
                 "possession": possession,
@@ -341,7 +341,7 @@ async def get_league_benchmarks(
             passes = te[te['type_name'] == 'Pass']
             completed_passes = passes[passes['pass_outcome'].isna()]
             pass_accuracy = len(completed_passes) / max(1, len(passes)) * 100 if len(passes) > 0 else 0
-            possessions = len(events[events['possession_team'] == tid]['possession'].unique())
+            possessions = len(events[events['possession_team_id'] == tid]['possession'].unique())
             total_possessions = len(events['possession'].unique())
             possession = possessions / max(1, total_possessions) * 100 if total_possessions > 0 else 0
             # PPDA: passes allowed per defensive action in opposition half

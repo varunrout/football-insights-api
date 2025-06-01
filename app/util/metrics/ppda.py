@@ -96,7 +96,7 @@ def _calculate_team_ppda(events_df: pd.DataFrame,
     action_count = len(defensive_actions)
 
     # Calculate PPDA (avoid division by zero)
-    ppda = pass_count / action_count if action_count > 0 else float('inf')
+    ppda = pass_count / action_count if action_count > 0 else None  # Use None instead of float('inf') for JSON compliance
 
     return {
         "ppda": ppda,

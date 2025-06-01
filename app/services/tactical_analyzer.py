@@ -411,7 +411,7 @@ class TacticalAnalyzer:
             network["style_analysis"] = style_analysis
 
             # Add match info
-            match_info = self._get_match_info(match_id)
+            match_info = self.metrics_engine._get_match_info(match_id)
             network["match_info"] = match_info
 
             # Cache the results
