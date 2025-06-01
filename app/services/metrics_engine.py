@@ -493,17 +493,25 @@ class MetricsEngine:
 
     def _get_player_matches(self, player_id: int, competition_id: Optional[int] = None,
                          team_id: Optional[int] = None, season_id: Optional[int] = None) -> List[int]:
-        """Get matches that a player participated in"""
-        # This would query matches from the data manager based on player
-        # Placeholder implementation
-        return [1000, 1001, 1002]  # Sample match IDs
+        """Get matches that a player participated in using FootballDataManager."""
+        # Use FootballDataManager to get matches for the player
+        if competition_id is not None and season_id is not None:
+            matches_df = self.data_manager.get_matches(competition_id, season_id)
+            if team_id is not None:
+                matches_df = matches_df[(matches_df['home_team_id'] == team_id) | (matches_df['away_team_id'] == team_id)]
+            # Filter matches where player is in lineup (if available)
+            # For now, return all match_ids (could be improved with lineup check)
+            return matches_df['match_id'].tolist()
+        return []
 
     def _get_team_matches(self, team_id: int, competition_id: Optional[int] = None,
                        season_id: Optional[int] = None) -> List[int]:
-        """Get matches that a team participated in"""
-        # This would query matches from the data manager based on team
-        # Placeholder implementation
-        return [1000, 1001, 1002, 1003, 1004]  # Sample match IDs
+        """Get matches that a team participated in using FootballDataManager."""
+        if competition_id is not None and season_id is not None:
+            matches_df = self.data_manager.get_matches(competition_id, season_id)
+            matches_df = matches_df[(matches_df['home_team_id'] == team_id) | (matches_df['away_team_id'] == team_id)]
+            return matches_df['match_id'].tolist()
+        return []
 
     def _extract_player_match_metrics(self, events_df: pd.DataFrame, player_id: int,
                                   match_id: int) -> Optional[Dict[str, Any]]:
