@@ -90,8 +90,6 @@ class TacticalAnalyzer:
                 is_home = False
                 if match_metrics.get("home_team_id") is not None:
                     is_home = match_metrics.get("home_team_id") == team_id
-                elif match_metrics.get("home_team") and isinstance(match_metrics.get("home_team"), str):
-                    is_home = str(team_id) in str(match_metrics.get("home_team"))
                 team_key = "home" if is_home else "away"
                 opp_key = "away" if is_home else "home"
 
@@ -239,8 +237,6 @@ class TacticalAnalyzer:
                 is_home = False
                 if match_metrics.get("home_team_id") is not None:
                     is_home = match_metrics.get("home_team_id") == team_id
-                elif match_metrics.get("home_team") and isinstance(match_metrics.get("home_team"), str):
-                    is_home = str(team_id) in str(match_metrics.get("home_team"))
                 team_key = "home" if is_home else "away"
 
                 # Extract offensive metrics directly from match metrics

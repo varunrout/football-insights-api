@@ -100,8 +100,8 @@ class MetricsEngine:
         match_info = self._get_match_info(match_id)
 
         # Initialize metrics dictionary
-        metrics = {"match_id": match_id, "home_team": match_info.get("home_team", "Unknown"),
-                   "away_team": match_info.get("away_team", "Unknown"), "score": match_info.get("score", "0-0"),
+        metrics = {"match_id": match_id, "home_team_name": match_info.get("home_team_name", "Unknown"),
+                   "away_team_name": match_info.get("away_team_name", "Unknown"), "score": match_info.get("score", "0-0"),
                    "possession": self._calculate_possession(events), "shots": self._calculate_shot_metrics(events),
                    "passes": self._calculate_pass_metrics(events),
                    "defensive": self._calculate_defensive_metrics(events), "xt": self._calculate_xt_metrics(events),
@@ -324,13 +324,13 @@ class MetricsEngine:
         events_with_xt = calculate_xt_added(events_df, self.xt_model)
 
         # Filter for pass events only
-        pass_events = events_with_xt[events_with_xt['type'] == 'Pass'].copy()
+        pass_events = events_with_xt[events_with_xt['type_name'] == 'Pass'].copy()
 
         if pass_events.empty:
             return pd.DataFrame()
 
         # Keep only relevant columns
-        result = pass_events[['id', 'player', 'team', 'minute', 'second',
+        result = pass_events[['id', 'player_id', 'team_id', 'minute', 'second',
                              'location', 'pass_end_location', 'xt_added']]
 
         # Rename for consistent API
@@ -344,8 +344,8 @@ class MetricsEngine:
         # For now, return a placeholder that would be replaced with actual implementation
         return {
             "match_id": match_id,
-            "home_team": f"Home Team for {match_id}",
-            "away_team": f"Away Team for {match_id}",
+            "home_team_name": f"Home Team for {match_id}",
+            "away_team_name": f"Away Team for {match_id}",
             "score": "0-0",
             "home_team_id": None,  # Would be a real ID in actual implementation
             "away_team_id": None   # Would be a real ID in actual implementation
