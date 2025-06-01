@@ -416,9 +416,8 @@ class MetricsEngine:
         # Use the consolidated method from metric_calculator for calculating xT
         events_with_xt = calculate_xt_added(events_df, self.xt_model)
 
-        # Extract team-specific metrics
-        teams = events_df['team'].dropna().unique()
-
+        # Extract team-specific metrics (use new schema: team_id, type_name)
+        teams = events_df['team_id'].dropna().unique()
         if len(teams) < 2:
             return {
                 "home_xt": 0.0,
@@ -433,18 +432,18 @@ class MetricsEngine:
         away_team = teams[1]
 
         # Calculate xT for each team
-        home_xt_events = events_with_xt[events_with_xt['team'] == home_team]
-        away_xt_events = events_with_xt[events_with_xt['team'] == away_team]
+        home_xt_events = events_with_xt[events_with_xt['team_id'] == home_team]
+        away_xt_events = events_with_xt[events_with_xt['team_id'] == away_team]
 
-        # Aggregate by event type
+        # Aggregate by event type (use type_name)
         home_xt_total = home_xt_events['xt_added'].sum()
         away_xt_total = away_xt_events['xt_added'].sum()
 
-        home_xt_passes = home_xt_events[home_xt_events['type'] == 'Pass']['xt_added'].sum()
-        away_xt_passes = away_xt_events[away_xt_events['type'] == 'Pass']['xt_added'].sum()
+        home_xt_passes = home_xt_events[home_xt_events['type_name'] == 'Pass']['xt_added'].sum()
+        away_xt_passes = away_xt_events[away_xt_events['type_name'] == 'Pass']['xt_added'].sum()
 
-        home_xt_carries = home_xt_events[home_xt_events['type'] == 'Carry']['xt_added'].sum()
-        away_xt_carries = away_xt_events[away_xt_events['type'] == 'Carry']['xt_added'].sum()
+        home_xt_carries = home_xt_events[home_xt_events['type_name'] == 'Carry']['xt_added'].sum()
+        away_xt_carries = away_xt_events[away_xt_events['type_name'] == 'Carry']['xt_added'].sum()
 
         return {
             "home_xt": home_xt_total,
@@ -461,32 +460,32 @@ class MetricsEngine:
         # Placeholder implementation
         player_metrics = {}
 
-        # Extract unique players
-        players = events_df['player'].dropna().unique()
+        # Extract unique players (use player_id)
+        players = events_df['player_id'].dropna().unique()
 
         for player in players:
             # Get player's team
-            player_events = events_df[events_df['player'] == player]
-            team = player_events['team'].iloc[0] if len(player_events) > 0 else "Unknown"
+            player_events = events_df[events_df['player_id'] == player]
+            team = player_events['team_id'].iloc[0] if len(player_events) > 0 else "Unknown"
 
             # Calculate minutes played (simplified)
             max_minute = player_events['minute'].max() if len(player_events) > 0 else 0
             min_minute = player_events['minute'].min() if len(player_events) > 0 else 0
             minutes_played = max_minute - min_minute
 
-            # Generate placeholder metrics
+            # Generate placeholder metrics (use type_name)
             player_metrics[player] = {
-                "player": player,
-                "team": team,
+                "player_id": player,
+                "team_id": team,
                 "match_id": match_id,
                 "minutes_played": minutes_played,
-                "passes": len(player_events[player_events['type'] == 'Pass']),
-                "shots": len(player_events[player_events['type'] == 'Shot']),
+                "passes": len(player_events[player_events['type_name'] == 'Pass']),
+                "shots": len(player_events[player_events['type_name'] == 'Shot']),
                 "xg": sum(player_events.get('shot_statsbomb_xg', 0)),
-                "goals": len(player_events[(player_events['type'] == 'Shot') &
+                "goals": len(player_events[(player_events['type_name'] == 'Shot') &
                                       (player_events['shot_outcome'] == 'Goal')]),
                 "assists": 0,  # Would need shot outcome + related pass info
-                "defensive_actions": len(player_events[player_events['type'].isin(['Tackle', 'Interception', 'Block'])])
+                "defensive_actions": len(player_events[player_events['type_name'].isin(['Tackle', 'Interception', 'Block'])])
             }
 
         return player_metrics
