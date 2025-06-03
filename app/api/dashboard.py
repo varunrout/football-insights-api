@@ -84,6 +84,8 @@ async def get_xg_timeline(
             timeline.append({
                 "match_id": match["match_id"],
                 "opponent": match.get("opponent", "N/A"),
+                "match_date": match.get("match_date", None),
+                "kick_off": match.get("kick_off", None),
                 "xg": xg,
                 "goals": goals
             })
@@ -131,12 +133,45 @@ async def get_shot_map(
             shot_list.append({
                 "x": shot["location"][0] if isinstance(shot["location"], list) else None,
                 "y": shot["location"][1] if isinstance(shot["location"], list) else None,
+                "end_x": shot.get("shot_end_location", [None, None, None])[0] if isinstance(shot.get("shot_end_location"), list) else None,
+                "end_y": shot.get("shot_end_location", [None, None, None])[1] if isinstance(shot.get("shot_end_location"), list) else None,
                 "xg": shot.get("shot_statsbomb_xg", 0),
                 "outcome": shot.get("shot_outcome", "Unknown"),
                 "minute": shot.get("minute", None),
-                "player_id": shot.get("player_id", None)
+                "player_id": shot.get("player_id", None),
+                "player_name": shot.get("player_name", "Unknown")
             })
-        return {"shots": shot_list}
+
+        # Add pitch dimensions and details
+        # Using StatsBomb's standard pitch dimensions (in yards)
+        pitch_info = {
+            "length": 120,
+            "width": 80,
+            "units": "yards",
+            "coordinate_system": "StatsBomb",
+            "origin": "bottom left",
+            "x_range": [0, 120],
+            "y_range": [0, 80],
+            "penalty_area": {
+                "width": 44,
+                "length": 18
+            },
+            "goal_area": {
+                "width": 20,
+                "length": 6
+            },
+            "goal": {
+                "width": 8,
+                "depth": 0
+            },
+            "center_circle_radius": 10,
+            "corner_radius": 1
+        }
+
+        return {
+            "shots": shot_list,
+            "pitch": pitch_info
+        }
     except Exception as e:
         logger.error(f"Error getting shot map: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
